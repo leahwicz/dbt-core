@@ -23,13 +23,13 @@ jobs:
   PostgresIntegrationTest:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     environment: 'Postgres'
     steps:
     - name: 'Install postgresql and set up database'
       run: |
-          ls $PGBIN
+          brew services start postgresql
           psql
       
 
