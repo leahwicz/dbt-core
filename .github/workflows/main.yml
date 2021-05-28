@@ -29,7 +29,8 @@ jobs:
     steps:
     - name: 'Install postgresql and set up database'
       run: |
-          rm /usr/local/var/postgres/postmaster.pid
+          postgres -D /usr/local/var/postgres
+          rm -rf /usr/local/var/postgres && initdb /usr/local/var/postgres -E utf8
           brew services restart postgresql
           createdb dbt
           psql
