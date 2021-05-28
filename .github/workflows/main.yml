@@ -30,6 +30,7 @@ jobs:
     - name: 'Install postgresql and set up database'
       run: |
           brew services start postgresql
+          createdb dbt
           psql
       
 
