@@ -30,7 +30,6 @@ jobs:
     - name: 'Install postgresql and set up database'
       run: |
           env
-          echo %PATH%
-          pg_ctl
+          psql
       
 
