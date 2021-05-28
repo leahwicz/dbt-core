@@ -27,10 +27,30 @@ jobs:
     runs-on: ${{ matrix.os }}
     environment: 'Postgres'
     steps:
-    - name: 'Install postgresql and set up database'
+    - name: Start PostgreSQL on MacOS
       run: |
-          postgres -D /usr/local/var/postgres
-          createdb dbt
-          psql
+        brew services start postgresql
+        echo "Check PostgreSQL service is running"
+        i=10
+        COMMAND='pg_isready'
+        while [ $i -gt 0 ]; do
+          echo "Check PostgreSQL service status"
+          eval $COMMAND && break
+          ((i--))
+          if [ $i == 0 ]; then
+              echo "PostgreSQL service not ready, all attempts exhausted"
+              exit 1
+          fi
+          echo "PostgreSQL service not ready, wait 10 more sec, attempts left: $i"
+          sleep 10
+        done
+    # Homebrew creates an account with the same name as the installing user, but no password
+    - name: Create scheduler user
+      run: |
+        psql --command="CREATE USER scheduler PASSWORD 'somestrong'" --command="\du" postgres
+    - name: Create timetable database
+      run: |
+        createdb --owner=scheduler timetable
+        PGPASSWORD=somestrong psql --username=scheduler --host=localhost --list timetable 
       
 
