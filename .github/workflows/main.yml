@@ -27,6 +27,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     environment: 'Postgres'
     steps:
+    - uses: actions/checkout@v2
     - name: Start PostgreSQL on MacOS
       run: |
         brew services start postgresql
@@ -47,10 +48,26 @@ jobs:
     # Homebrew creates an account with the same name as the installing user, but no password
     - name: Create scheduler user
       run: |
-        psql --command="CREATE USER scheduler PASSWORD 'somestrong'" --command="\du" postgres
-    - name: Create timetable database
-      run: |
-        createdb --owner=scheduler timetable
-        PGPASSWORD=somestrong psql --username=scheduler --host=localhost --list timetable 
+        createdb dbt
+        psql -c "CREATE ROLE root WITH PASSWORD 'password';"
+        psql -c "ALTER ROLE root WITH LOGIN;"
+        psql -c "GRANT CREATE, CONNECT ON DATABASE dbt TO root WITH GRANT OPTION;"
+
+        psql -c "CREATE ROLE noaccess WITH PASSWORD 'password' NOSUPERUSER;"
+        psql -c "ALTER ROLE noaccess WITH LOGIN;"
+        psql -c "GRANT CONNECT ON DATABASE dbt TO noaccess;"
+
+        psql -c 'CREATE DATABASE "dbtMixedCase";'
+        psql -c 'GRANT CREATE, CONNECT ON DATABASE "dbtMixedCase" TO root WITH GRANT OPTION;'
+    - name: Setup Python
+      uses: actions/setup-python@v2.2.2
+      with:
+        python-version: '3.7'
+        architecture: 'x64'
+        
+    - name: 'Install dependencies'
+      run: python -m pip install --upgrade pip && pip install tox
       
+    - name: 'Run integration tests'
+      run: python -m tox -e py-postgres -- -v -n4      
 
