@@ -29,7 +29,7 @@ jobs:
     steps:
     - name: 'Install postgresql and set up database'
       run: |
-          env
+          ls $PGBIN
           psql
       
 
