@@ -23,15 +23,13 @@ jobs:
   PostgresIntegrationTest:
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [macos-latest]
     runs-on: ${{ matrix.os }}
     environment: 'Postgres'
     steps:
     - name: 'Install postgresql and set up database'
       run: |
           postgres -D /usr/local/var/postgres
-          rm -rf /usr/local/var/postgres && initdb /usr/local/var/postgres -E utf8
-          brew services restart postgresql
           createdb dbt
           psql
       
