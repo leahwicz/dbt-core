@@ -48,8 +48,9 @@ jobs:
     # Homebrew creates an account with the same name as the installing user, but no password
     - name: Create scheduler user
       run: |  
+        PGHOST=localhost PGUSER=root PGPASSWORD=password PGDATABASE=postgres bash test/setup_db.sh
         createdb dbt 
-        psql --command="CREATE USER root PASSWORD 'somestrong'" --command="\du" postgres
+        psql -c "CREATE ROLE root WITH PASSWORD 'password';"
         psql -c "ALTER ROLE root WITH LOGIN;"
         psql -c "GRANT CREATE, CONNECT ON DATABASE dbt TO root WITH GRANT OPTION;"
 
