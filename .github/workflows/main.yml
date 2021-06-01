@@ -49,10 +49,10 @@ jobs:
     - name: Create scheduler user
       run: |  
         psql --command="CREATE USER testAcct PASSWORD 'somestrong'" --command="\du" postgres
-        createdb dbt --owner=testAcct
         psql -c "CREATE ROLE root WITH PASSWORD 'password';"
         psql -c "ALTER ROLE root WITH LOGIN;"
         psql -c "GRANT CREATE, CONNECT ON DATABASE dbt TO root WITH GRANT OPTION;"
+        createdb dbt --owner=testAcct
 
         psql -c "CREATE ROLE noaccess WITH PASSWORD 'password' NOSUPERUSER;"
         psql -c "ALTER ROLE noaccess WITH LOGIN;"
