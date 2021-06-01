@@ -48,11 +48,10 @@ jobs:
     # Homebrew creates an account with the same name as the installing user, but no password
     - name: Create scheduler user
       run: |  
-        psql --command="CREATE USER testAcct PASSWORD 'somestrong'" --command="\du" postgres
-        psql -c "CREATE ROLE root WITH PASSWORD 'password';"
+        createdb dbt 
+        psql --command="CREATE USER root PASSWORD 'somestrong'" --command="\du" postgres
         psql -c "ALTER ROLE root WITH LOGIN;"
         psql -c "GRANT CREATE, CONNECT ON DATABASE dbt TO root WITH GRANT OPTION;"
-        createdb dbt --owner=testAcct
 
         psql -c "CREATE ROLE noaccess WITH PASSWORD 'password' NOSUPERUSER;"
         psql -c "ALTER ROLE noaccess WITH LOGIN;"
