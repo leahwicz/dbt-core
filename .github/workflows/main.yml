@@ -49,7 +49,7 @@ jobs:
     - name: Create scheduler user
       run: |  
         psql --command="CREATE USER root PASSWORD 'password'" --command="\du" postgres
-        createdb --owner=root dbt
+        createdb --owner=root dbt PGPASSWORD=password psql --username=root --host=localhost --list timetable 
         PGHOST=localhost PGUSER=root PGPASSWORD=password PGDATABASE=postgres bash test/setup_db.sh
 
     - name: Setup Python
