@@ -51,8 +51,10 @@ jobs:
         psql --command="CREATE USER root PASSWORD 'password'" --command="\du" postgres
         createdb --owner=root dbt 
         PGPASSWORD=password psql --username=root --host=localhost --list dbt 
-        PGHOST=localhost PGUSER=root PGPASSWORD=password PGDATABASE=postgres bash test/setup_db.sh
-
+        psql --command="CREATE USER noaccess PASSWORD 'password'" --command="\du" postgres
+        psql --command="grant all privileges on database dbt to noaccess" --command="\du" postgres
+        createdb --owner=root dbtMixedCase 
+        
     - name: Setup Python
       uses: actions/setup-python@v2.2.2
       with:
