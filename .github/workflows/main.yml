@@ -48,7 +48,7 @@ jobs:
     # Homebrew creates an account with the same name as the installing user, but no password
     - name: Create scheduler user
       run: |  
-        sudo -u postgres createuser root
+        psql --command="CREATE USER root PASSWORD 'password'" --command="\du" postgres
         PGHOST=localhost PGUSER=root PGPASSWORD=password PGDATABASE=postgres bash test/setup_db.sh
 
     - name: Setup Python
