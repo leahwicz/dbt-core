@@ -23,7 +23,13 @@ jobs:
   PostgresIntegrationTest:
     strategy:
       matrix:
-        python-version: [ '3.6', '3.7', '3.8' ]
+        include: 
+          - python-version: '3.6'
+            environment-version: 'py36-postgres'
+          - python-version: '3.7'
+            environment-version: 'py37-postgres'
+          - python-version: '3.8'
+            environment-version: 'py38-postgres'
     runs-on: macos-latest
     environment: 'Postgres'
     steps:
@@ -65,5 +71,5 @@ jobs:
       run: python -m pip install --upgrade pip && pip install tox
       
     - name: 'Run integration tests'
-      run: tox -p -e py${{ matrix.python-version }}-postgres -- -v -n4     
+      run: tox -p -e ${{ matrix.environment-version }} -- -v -n4     
 
