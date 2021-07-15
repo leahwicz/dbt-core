@@ -1,40 +1,60 @@
-# This is a workflow to run our unit and integration tests for windows and mac
+# This is a workflow to run our linting and unit tests for windows, mac, and linux
 
-name: dbt Tests
+name: Linting and Unit Tests
 
 # Triggers
 on:
-  # Triggers the workflow on push or pull request events but only for the develop branch
+  # Trigger on commits to develop and releases
   push:
-    branches: [ develop ]
-  pull_request:
     branches: 
       - 'develop' 
       - '*.latest' 
-      - 'pr/*'
       - 'releases/*'
-  pull_request_target:  
-    branches: [ develop ]
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
+  pull_request_target: # Trigger for all PRs
+  workflow_dispatch: # Allow manual triggers
 
 jobs:
-  UnitTest:
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.6', '3.7', '3.8']
-    runs-on: ${{ matrix.os }}
+  Linting:
+    runs-on: ubuntu-latest #no need to run on every OS
     steps:
     - uses: actions/checkout@v2
     - name: Setup Python
       uses: actions/setup-python@v2.2.2
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.8'
+        architecture: 'x64'
+
+    - name: 'Install dependencies'
+      run: python -m pip install --upgrade pip && pip install tox
+      
+    - name: 'Linting'
+      run: tox -e mypy,flake8 -- -v
+      
+  UnitTest:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup Python 3.6
+      uses: actions/setup-python@v2.2.2
+      with:
+        python-version: '3.6'
+        architecture: 'x64'
+    - name: Setup Python 3.7
+      uses: actions/setup-python@v2.2.2
+      with:
+        python-version: '3.7'
+        architecture: 'x64'
+    - name: Setup Python 3.8
+      uses: actions/setup-python@v2.2.2
+      with:
+        python-version: '3.8'
         architecture: 'x64'
 
     - name: 'Install dependencies'
       run: python -m pip install --upgrade pip && pip install tox
 
     - name: 'Run unit tests'
-      run: python -m tox -e py -- -v
+      run: tox -p -e py36,py37,py38
