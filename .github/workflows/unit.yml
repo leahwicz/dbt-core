@@ -1,6 +1,6 @@
 # This is a workflow to run our linting and unit tests for windows, mac, and linux
 
-name: Linting and Unit Tests
+name: Real Linting and Unit Tests
 
 # Triggers
 on:
