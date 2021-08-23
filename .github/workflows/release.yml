@@ -23,9 +23,6 @@ jobs:
           python-version: "3.8"
       - run: mkdir build && mkdir artifacts
       - uses: actions/checkout@v2
-      - uses: webfactory/ssh-agent@v0.4.1
-        with:
-          ssh-private-key: ${{ secrets.DBT_DEPLOY_SSH_KEY }}
       - run: git config --global user.email "buildbot@fishtownanalytics.com"
       - run: git config --global user.name "Github Build Bot"
       - name: Look for new build requests and build wheels
