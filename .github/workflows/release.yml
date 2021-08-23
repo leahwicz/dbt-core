@@ -21,6 +21,8 @@ jobs:
           python-version: "3.8"
       - run: mkdir build && mkdir artifacts
       - uses: actions/checkout@v2
+        with:
+          fetch-depth: 2
       - run: cd release && ls -lrot
       - run: git status && git log -n 5 && cd ..
       - run: git config --global user.email "buildbot@fishtownanalytics.com"
