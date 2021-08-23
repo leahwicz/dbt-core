@@ -5,9 +5,6 @@ on:
 
 jobs:
   create-commit:
-    defaults:
-      run:
-        working-directory: ./release
     # after this step:
     #  - there should be 1 new commit in dbt.
     #  - in that commit there should be a requirements file at docker/requirements/requirements.{version}.txt
@@ -30,7 +27,7 @@ jobs:
       - run: git config --global user.name "Github Build Bot"
       - name: Look for new build requests and build wheels
         id: createrelease
-        run: /bin/bash scripts/script_shim.bash native create
+        run: /bin/bash release/scripts/script_shim.bash native create
       - name: Store releasefile artifact
         uses: actions/upload-artifact@v2
         with:
