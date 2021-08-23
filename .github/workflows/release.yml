@@ -5,8 +5,9 @@ on:
 
 jobs:
   create-commit:
-    env:
-      working-directory: ./release
+    defaults:
+      run:
+        working-directory: ./release
     # after this step:
     #  - there should be 1 new commit in dbt.
     #  - in that commit there should be a requirements file at docker/requirements/requirements.{version}.txt
