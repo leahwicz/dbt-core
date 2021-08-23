@@ -253,7 +253,7 @@ class ReleaseFile:
         for line in result.strip().split("\n"):
             if line[0] not in "AM":
                 continue
-            match = re.match(r"^[AM]\s*(releases/.*)", line)
+            match = re.match(r"^[AM]\s*(release/releases/.*)", line)
             if match is None:
                 continue
             path = Path(match.group(1))
