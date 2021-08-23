@@ -20,9 +20,9 @@ jobs:
         with:
           python-version: "3.8"
       - run: mkdir build && mkdir artifacts
-      - run: ls
-      - run: pwd
       - uses: actions/checkout@v2
+      - run: ls -lrot
+      - run: git status
       - run: git config --global user.email "buildbot@fishtownanalytics.com"
       - run: git config --global user.name "Github Build Bot"
       - name: Look for new build requests and build wheels
