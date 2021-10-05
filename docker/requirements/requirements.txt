@@ -5,9 +5,9 @@ certifi==2021.5.30
 cffi==1.14.6
 charset-normalizer==2.0.6
 colorama==0.4.4
-dbt-core==0.21.3
+dbt-core==0.21.6
 dbt-extractor==0.4.0
-dbt-postgres==0.21.3
+dbt-postgres==0.21.6
 hologram==0.0.14
 idna==3.2
 importlib-metadata==4.8.1
