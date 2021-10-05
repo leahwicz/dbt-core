@@ -12,7 +12,8 @@ on:
 # Release version number that must be updated for each release
 env:
   version_number: '0.21.6'
-  is_dry_run: true 
+  is_dry_run: true
+  commit_branch: $GITHUB_REF
   
 jobs:
   bump:
@@ -29,12 +30,13 @@ jobs:
         run: |
           python3 -m venv env
           source env/bin/activate
-          pip install --upgrade pip
+          pip install --upgrade pip     
           
       - name: Create PR branch
         if: ${{ env.is_dry_run }}
         run: |
           git checkout -b bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
+          echo bumping-version/${{env.version_number}}_$GITHUB_RUN_ID >> ${{env.commit_branch}}
           
       - name: Generate Docker requirements
         run: |
@@ -56,4 +58,5 @@ jobs:
           author_name: 'Github Build Bot'
           author_email: 'buildbot@fishtownanalytics.com'
           message: 'Bumping version to ${{env.version_number}}'
+          branch: '${{env.commit_branch}}'
         
