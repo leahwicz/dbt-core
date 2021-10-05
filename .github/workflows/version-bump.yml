@@ -77,3 +77,4 @@ jobs:
           draft: true
           base: ${{github.ref}}
           title: 'Bumping version to ${{env.version_number}}'
+          branch: 'bumping-version/${{env.version_number}}_${{GITHUB.RUN_ID}}'
