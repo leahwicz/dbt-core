@@ -9,6 +9,11 @@ on:
       - "releases/*"
   workflow_dispatch:
   
+# Release version number that must be updated for each release
+env:
+  version_number: '0.21.6'
+  is_dry_run: true 
+  
 jobs:
   bump:
     runs-on: ubuntu-latest
@@ -19,12 +24,7 @@ jobs:
       - uses: actions/setup-python@v2
         with:
           python-version: "3.8"
-          
-      - run: mkdir build && mkdir artifacts
-      
-      - run: git config --global user.email "buildbot@fishtownanalytics.com"
-      - run: git config --global user.name "Github Build Bot"
-      
+
       - name: Install python dependencies
         run: |
           python3 -m venv env
@@ -42,6 +42,23 @@ jobs:
         run: |
           source env/bin/activate
           pip install -r dev-requirements.txt 
-          env/bin/bumpversion --allow-dirty --commit --new-version 0.21.3 major
-          git push
+          env/bin/bumpversion --allow-dirty --commit --new-version {{env.version_number}} major
+
+
+      - name: Commit version bump 
+        if: ${{ !env.is_dry_run }}
+        uses: EndBug/add-and-commit@v7
+        with:
+          author_name: 'Github Build Bot'
+          author_email: 'buildbot@fishtownanalytics.com'
+          message: 'Bumping version to ${{env.version_number}}'
+          
+      - name: Commit version bump 
+        if: ${{ env.is_dry_run }}
+        uses: EndBug/add-and-commit@v7
+        with:
+          author_name: 'Github Build Bot'
+          author_email: 'buildbot@fishtownanalytics.com'
+          message: 'Bumping version to ${{env.version_number}}'
+          branch: 'bumping-version/{{env.version_number}}' 
           
