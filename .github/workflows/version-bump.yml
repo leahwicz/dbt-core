@@ -8,6 +8,8 @@ on:
       - "*.latest"
       - "releases/*"
   workflow_dispatch:
+  repository_dispatch:
+    types: [version-bump]
   
 # Release version number that must be updated for each release
 env:
@@ -20,6 +22,11 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v2
+
+      - name: Check inputs
+        run: |
+          echo ${{ github.event.client_payload.version_number }}
+          echo ${{ github.event.client_payload.is_dry_run }}
 
       - uses: actions/setup-python@v2
         with:
