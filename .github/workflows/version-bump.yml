@@ -11,7 +11,7 @@ on:
   
 # Release version number that must be updated for each release
 env:
-  version_number: '0.21.7'
+  version_number: '0.21.8'
   is_dry_run: true
  
 jobs:
