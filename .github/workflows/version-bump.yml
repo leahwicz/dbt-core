@@ -68,3 +68,13 @@ jobs:
           author_email: 'buildbot@fishtownanalytics.com'
           message: 'Bumping version to ${{env.version_number}}'
           branch: 'bumping-version/${{env.version_number}}_${{GITHUB.RUN_ID}}'
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v3
+        if: ${{ env.is_dry_run }}
+        with:
+          author: 'Github Build Bot <buildbot@fishtownanalytics.com>'
+          draft: true
+          base: ${{github.ref}}
+          branch: 'bumping-version/${{env.version_number}}_${{GITHUB.RUN_ID}}'
+          title: 'Bumping version to ${{env.version_number}}'
