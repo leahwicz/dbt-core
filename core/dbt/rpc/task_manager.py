@@ -1,3 +1,4 @@
+from copy import deepcopy
 import threading
 import uuid
 from datetime import datetime
@@ -19,7 +20,7 @@ from dbt.contracts.rpc import (
     TaskID,
 )
 from dbt.logger import LogMessage, list_handler
-from dbt.perf_utils import get_full_manifest
+from dbt.parser.manifest import ManifestLoader
 from dbt.rpc.error import dbt_error
 from dbt.rpc.gc import GarbageCollector
 from dbt.rpc.task_handler_protocol import TaskHandlerProtocol, TaskHandlerMap
@@ -155,7 +156,7 @@ class TaskManager:
                     f'Manifest should not be None if the last parse state is '
                     f'{state}'
                 )
-            return task(self.args, self.config, self.manifest)
+            return task(deepcopy(self.args), self.config, self.manifest)
 
     def rpc_task(
         self, method_name: str
@@ -167,7 +168,7 @@ class TaskManager:
             elif issubclass(task, RemoteManifestMethod):
                 return self._get_manifest_callable(task)
             elif issubclass(task, RemoteMethod):
-                return task(self.args, self.config)
+                return task(deepcopy(self.args), self.config)
             else:
                 raise dbt.exceptions.InternalException(
                     f'Got a task with an invalid type! {task} with method '
@@ -187,7 +188,7 @@ class TaskManager:
         return True
 
     def parse_manifest(self) -> None:
-        self.manifest = get_full_manifest(self.config, reset=True)
+        self.manifest = ManifestLoader.get_full_manifest(self.config, reset=True)
 
     def set_compile_exception(self, exc, logs=List[LogMessage]) -> None:
         assert self.last_parse.state == ManifestStatus.Compiling, \

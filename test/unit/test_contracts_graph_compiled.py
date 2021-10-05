@@ -3,7 +3,7 @@ import pytest
 
 from dbt.contracts.files import FileHash
 from dbt.contracts.graph.compiled import (
-    CompiledModelNode, InjectedCTE, CompiledSchemaTestNode
+    CompiledModelNode, InjectedCTE, CompiledGenericTestNode
 )
 from dbt.contracts.graph.parsed import (
     DependsOn, NodeConfig, TestConfig, TestMetadata, ColumnInfo
@@ -11,8 +11,8 @@ from dbt.contracts.graph.parsed import (
 from dbt.node_types import NodeType
 
 from .utils import (
-    assert_from_dict,
     assert_symmetric,
+    assert_from_dict,
     assert_fails_validation,
     dict_replace,
     replace_config,
@@ -88,6 +88,7 @@ def minimal_uncompiled_dict():
     return {
         'name': 'foo',
         'root_path': '/root/',
+        'created_at': 1,
         'resource_type': str(NodeType.Model),
         'path': '/root/models/foo.sql',
         'original_file_path': 'models/foo.sql',
@@ -109,6 +110,7 @@ def basic_uncompiled_dict():
     return {
         'name': 'foo',
         'root_path': '/root/',
+        'created_at': 1,
         'resource_type': str(NodeType.Model),
         'path': '/root/models/foo.sql',
         'original_file_path': 'models/foo.sql',
@@ -134,7 +136,8 @@ def basic_uncompiled_dict():
             'pre-hook': [],
             'quoting': {},
             'tags': [],
-            'vars': {},
+            'on_schema_change': 'ignore',
+            'meta': {},
         },
         'docs': {'show': True},
         'columns': {},
@@ -152,6 +155,7 @@ def basic_compiled_dict():
     return {
         'name': 'foo',
         'root_path': '/root/',
+        'created_at': 1,
         'resource_type': str(NodeType.Model),
         'path': '/root/models/foo.sql',
         'original_file_path': 'models/foo.sql',
@@ -177,7 +181,8 @@ def basic_compiled_dict():
             'pre-hook': [],
             'quoting': {},
             'tags': [],
-            'vars': {},
+            'on_schema_change': 'ignore',
+            'meta': {},
         },
         'docs': {'show': True},
         'columns': {},
@@ -198,7 +203,6 @@ def test_basic_uncompiled_model(minimal_uncompiled_dict, basic_uncompiled_dict, 
     assert node.empty is False
     assert node.is_refable is True
     assert node.is_ephemeral is False
-    assert node.local_vars() == {}
 
     assert_from_dict(node, minimal_uncompiled_dict, CompiledModelNode)
     pickle.loads(pickle.dumps(node))
@@ -211,7 +215,6 @@ def test_basic_compiled_model(basic_compiled_dict, basic_compiled_model):
     assert node.empty is False
     assert node.is_refable is True
     assert node.is_ephemeral is False
-    assert node.local_vars() == {}
 
 
 def test_invalid_extra_fields_model(minimal_uncompiled_dict):
@@ -310,6 +313,7 @@ def minimal_schema_test_dict():
     return {
         'name': 'foo',
         'root_path': '/root/',
+        'created_at': 1,
         'resource_type': str(NodeType.Test),
         'path': '/root/x/path.sql',
         'original_file_path': '/root/path.sql',
@@ -318,7 +322,7 @@ def minimal_schema_test_dict():
         'unique_id': 'model.test.foo',
         'fqn': ['test', 'models', 'foo'],
         'database': 'test_db',
-        'schema': 'test_schema',
+        'schema': 'dbt_test__audit',
         'alias': 'bar',
         'test_metadata': {
             'name': 'foo',
@@ -331,7 +335,7 @@ def minimal_schema_test_dict():
 
 @pytest.fixture
 def basic_uncompiled_schema_test_node():
-    return CompiledSchemaTestNode(
+    return CompiledGenericTestNode(
         package_name='test',
         root_path='/root/',
         path='/root/x/path.sql',
@@ -347,7 +351,7 @@ def basic_uncompiled_schema_test_node():
         depends_on=DependsOn(),
         description='',
         database='test_db',
-        schema='test_schema',
+        schema='dbt_test__audit',
         alias='bar',
         tags=[],
         config=TestConfig(),
@@ -363,7 +367,7 @@ def basic_uncompiled_schema_test_node():
 
 @pytest.fixture
 def basic_compiled_schema_test_node():
-    return CompiledSchemaTestNode(
+    return CompiledGenericTestNode(
         package_name='test',
         root_path='/root/',
         path='/root/x/path.sql',
@@ -379,7 +383,7 @@ def basic_compiled_schema_test_node():
         deferred=False,
         description='',
         database='test_db',
-        schema='test_schema',
+        schema='dbt_test__audit',
         alias='bar',
         tags=[],
         config=TestConfig(severity='warn'),
@@ -402,6 +406,7 @@ def basic_uncompiled_schema_test_dict():
     return {
         'name': 'foo',
         'root_path': '/root/',
+        'created_at': 1,
         'resource_type': str(NodeType.Test),
         'path': '/root/x/path.sql',
         'original_file_path': '/root/path.sql',
@@ -414,20 +419,19 @@ def basic_uncompiled_schema_test_dict():
         'depends_on': {'macros': [], 'nodes': []},
         'database': 'test_db',
         'description': '',
-        'schema': 'test_schema',
+        'schema': 'dbt_test__audit',
         'alias': 'bar',
         'tags': [],
         'config': {
-            'column_types': {},
             'enabled': True,
             'materialized': 'test',
-            'persist_docs': {},
-            'post-hook': [],
-            'pre-hook': [],
-            'quoting': {},
             'tags': [],
-            'vars': {},
             'severity': 'ERROR',
+            'schema': 'dbt_test__audit',
+            'warn_if': '!= 0',
+            'error_if': '!= 0',
+            'fail_calc': 'count(*)',
+            'meta': {},
         },
         'deferred': False,
         'docs': {'show': True},
@@ -450,6 +454,7 @@ def basic_compiled_schema_test_dict():
     return {
         'name': 'foo',
         'root_path': '/root/',
+        'created_at': 1,
         'resource_type': str(NodeType.Test),
         'path': '/root/x/path.sql',
         'original_file_path': '/root/path.sql',
@@ -463,22 +468,20 @@ def basic_compiled_schema_test_dict():
         'deferred': False,
         'database': 'test_db',
         'description': '',
-        'schema': 'test_schema',
+        'schema': 'dbt_test__audit',
         'alias': 'bar',
         'tags': [],
         'config': {
-            'column_types': {},
             'enabled': True,
             'materialized': 'test',
-            'persist_docs': {},
-            'post-hook': [],
-            'pre-hook': [],
-            'quoting': {},
             'tags': [],
-            'vars': {},
             'severity': 'warn',
+            'schema': 'dbt_test__audit',
+            'warn_if': '!= 0',
+            'error_if': '!= 0',
+            'fail_calc': 'count(*)',
+            'meta': {},
         },
-
         'docs': {'show': True},
         'columns': {},
         'meta': {},
@@ -503,36 +506,34 @@ def test_basic_uncompiled_schema_test(basic_uncompiled_schema_test_node, basic_u
     node_dict = basic_uncompiled_schema_test_dict
     minimum = minimal_schema_test_dict
 
-    assert_symmetric(node, node_dict, CompiledSchemaTestNode)
+    assert_symmetric(node, node_dict, CompiledGenericTestNode)
     assert node.empty is False
     assert node.is_refable is False
     assert node.is_ephemeral is False
-    assert node.local_vars() == {}
 
-    assert_from_dict(node, minimum, CompiledSchemaTestNode)
+    assert_from_dict(node, minimum, CompiledGenericTestNode)
 
 
 def test_basic_compiled_schema_test(basic_compiled_schema_test_node, basic_compiled_schema_test_dict):
     node = basic_compiled_schema_test_node
     node_dict = basic_compiled_schema_test_dict
 
-    assert_symmetric(node, node_dict, CompiledSchemaTestNode)
+    assert_symmetric(node, node_dict, CompiledGenericTestNode)
     assert node.empty is False
     assert node.is_refable is False
     assert node.is_ephemeral is False
-    assert node.local_vars() == {}
 
 
 def test_invalid_extra_schema_test_fields(minimal_schema_test_dict):
     bad_extra = minimal_schema_test_dict
     bad_extra['extra'] = 'extra value'
-    assert_fails_validation(bad_extra, CompiledSchemaTestNode)
+    assert_fails_validation(bad_extra, CompiledGenericTestNode)
 
 
 def test_invalid_resource_type_schema_test(minimal_schema_test_dict):
     bad_type = minimal_schema_test_dict
     bad_type['resource_type'] = str(NodeType.Model)
-    assert_fails_validation(bad_type, CompiledSchemaTestNode)
+    assert_fails_validation(bad_type, CompiledGenericTestNode)
 
 
 unchanged_schema_tests = [

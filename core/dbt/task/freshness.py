@@ -19,7 +19,7 @@ from dbt.exceptions import RuntimeException, InternalException
 from dbt.logger import print_timestamped_line
 from dbt.node_types import NodeType
 
-from dbt.graph import NodeSelector, SelectionSpec, parse_difference
+from dbt.graph import ResourceTypeSelector
 from dbt.contracts.graph.parsed import ParsedSourceDefinition
 
 
@@ -65,7 +65,8 @@ class FreshnessRunner(BaseRunner):
             timing=timing_info,
             message=message,
             node=node,
-            adapter_response={}
+            adapter_response={},
+            failures=None,
         )
 
     def from_run_result(self, result, start_time, timing_info):
@@ -104,6 +105,7 @@ class FreshnessRunner(BaseRunner):
             execution_time=0,
             message=None,
             adapter_response={},
+            failures=None,
             **freshness
         )
 
@@ -115,7 +117,7 @@ class FreshnessRunner(BaseRunner):
         return self.node
 
 
-class FreshnessSelector(NodeSelector):
+class FreshnessSelector(ResourceTypeSelector):
     def node_is_match(self, node):
         if not super().node_is_match(node):
             return False
@@ -134,14 +136,6 @@ class FreshnessTask(GraphRunnableTask):
     def raise_on_first_error(self):
         return False
 
-    def get_selection_spec(self) -> SelectionSpec:
-        include = [
-            'source:{}'.format(s)
-            for s in (self.args.selected or ['*'])
-        ]
-        spec = parse_difference(include, None)
-        return spec
-
     def get_node_selector(self):
         if self.manifest is None or self.graph is None:
             raise InternalException(
@@ -151,9 +145,10 @@ class FreshnessTask(GraphRunnableTask):
             graph=self.graph,
             manifest=self.manifest,
             previous_state=self.previous_state,
+            resource_types=[NodeType.Source]
         )
 
-    def get_runner_type(self):
+    def get_runner_type(self, _):
         return FreshnessRunner
 
     def write_result(self, result):

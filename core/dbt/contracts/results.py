@@ -78,6 +78,7 @@ class TestStatus(StrEnum):
     Error = NodeStatus.Error
     Fail = NodeStatus.Fail
     Warn = NodeStatus.Warn
+    Skipped = NodeStatus.Skipped
 
 
 class FreshnessStatus(StrEnum):
@@ -94,13 +95,16 @@ class BaseResult(dbtClassMixin):
     thread_id: str
     execution_time: float
     adapter_response: Dict[str, Any]
-    message: Optional[Union[str, int]]
+    message: Optional[str]
+    failures: Optional[int]
 
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
-        data = super().__pre_deserialize__(data, options=options)
+    def __pre_deserialize__(cls, data):
+        data = super().__pre_deserialize__(data)
         if 'message' not in data:
             data['message'] = None
+        if 'failures' not in data:
+            data['failures'] = None
         return data
 
 
@@ -157,7 +161,8 @@ def process_run_result(result: RunResult) -> RunResultOutput:
         thread_id=result.thread_id,
         execution_time=result.execution_time,
         message=result.message,
-        adapter_response=result.adapter_response
+        adapter_response=result.adapter_response,
+        failures=result.failures
     )
 
 
@@ -180,7 +185,7 @@ class RunExecutionResult(
 
 
 @dataclass
-@schema_version('run-results', 1)
+@schema_version('run-results', 3)
 class RunResultsArtifact(ExecutionResult, ArtifactMixin):
     results: Sequence[RunResultOutput]
     args: Dict[str, Any] = field(default_factory=dict)
@@ -206,7 +211,7 @@ class RunResultsArtifact(ExecutionResult, ArtifactMixin):
         )
 
     def write(self, path: str):
-        write_json(path, self.to_dict(options={'keep_none': True}))
+        write_json(path, self.to_dict(omit_none=False))
 
 
 @dataclass
@@ -280,6 +285,9 @@ class SourceFreshnessOutput(dbtClassMixin):
     status: FreshnessStatus
     criteria: FreshnessThreshold
     adapter_response: Dict[str, Any]
+    timing: List[TimingInfo]
+    thread_id: str
+    execution_time: float
 
 
 @dataclass
@@ -328,7 +336,10 @@ def process_freshness_result(
         max_loaded_at_time_ago_in_s=result.age,
         status=result.status,
         criteria=criteria,
-        adapter_response=result.adapter_response
+        adapter_response=result.adapter_response,
+        timing=result.timing,
+        thread_id=result.thread_id,
+        execution_time=result.execution_time,
     )
 
 
@@ -358,7 +369,7 @@ class FreshnessResult(ExecutionResult):
 
 
 @dataclass
-@schema_version('sources', 1)
+@schema_version('sources', 2)
 class FreshnessExecutionResultArtifact(
     ArtifactMixin,
     VersionedSchema,
@@ -378,6 +389,7 @@ class FreshnessExecutionResultArtifact(
 
 
 Primitive = Union[bool, str, float, None]
+PrimitiveDict = Dict[str, Primitive]
 
 CatalogKey = NamedTuple(
     'CatalogKey',
@@ -448,8 +460,8 @@ class CatalogResults(dbtClassMixin):
     errors: Optional[List[str]] = None
     _compile_results: Optional[Any] = None
 
-    def __post_serialize__(self, dct, options=None):
-        dct = super().__post_serialize__(dct, options=options)
+    def __post_serialize__(self, dct):
+        dct = super().__post_serialize__(dct)
         if '_compile_results' in dct:
             del dct['_compile_results']
         return dct

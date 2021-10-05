@@ -45,7 +45,7 @@ class BaseRelation(FakeAPIObject, Hashable):
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return False
-        return self.to_dict() == other.to_dict()
+        return self.to_dict(omit_none=True) == other.to_dict(omit_none=True)
 
     @classmethod
     def get_default_quote_policy(cls) -> Policy:
@@ -185,10 +185,10 @@ class BaseRelation(FakeAPIObject, Hashable):
     def create_from_source(
         cls: Type[Self], source: ParsedSourceDefinition, **kwargs: Any
     ) -> Self:
-        source_quoting = source.quoting.to_dict()
+        source_quoting = source.quoting.to_dict(omit_none=True)
         source_quoting.pop('column', None)
         quote_policy = deep_merge(
-            cls.get_default_quote_policy().to_dict(),
+            cls.get_default_quote_policy().to_dict(omit_none=True),
             source_quoting,
             kwargs.get('quote_policy', {}),
         )
@@ -433,13 +433,14 @@ class SchemaSearchMap(Dict[InformationSchema, Set[Optional[str]]]):
             for schema in schemas:
                 yield information_schema_name, schema
 
-    def flatten(self):
+    def flatten(self, allow_multiple_databases: bool = False):
         new = self.__class__()
 
-        # make sure we don't have duplicates
-        seen = {r.database.lower() for r in self if r.database}
-        if len(seen) > 1:
-            dbt.exceptions.raise_compiler_error(str(seen))
+        # make sure we don't have multiple databases if allow_multiple_databases is set to False
+        if not allow_multiple_databases:
+            seen = {r.database.lower() for r in self if r.database}
+            if len(seen) > 1:
+                dbt.exceptions.raise_compiler_error(str(seen))
 
         for information_schema_name, schema in self.search():
             path = {

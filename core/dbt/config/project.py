@@ -347,18 +347,22 @@ class PartialProject(RenderComponents):
         # break many things
         quoting: Dict[str, Any] = {}
         if cfg.quoting is not None:
-            quoting = cfg.quoting.to_dict()
+            quoting = cfg.quoting.to_dict(omit_none=True)
 
+        dispatch: List[Dict[str, Any]]
         models: Dict[str, Any]
         seeds: Dict[str, Any]
         snapshots: Dict[str, Any]
         sources: Dict[str, Any]
+        tests: Dict[str, Any]
         vars_value: VarProvider
 
+        dispatch = cfg.dispatch
         models = cfg.models
         seeds = cfg.seeds
         snapshots = cfg.snapshots
         sources = cfg.sources
+        tests = cfg.tests
         if cfg.vars is None:
             vars_dict: Dict[str, Any] = {}
         else:
@@ -400,6 +404,7 @@ class PartialProject(RenderComponents):
             models=models,
             on_run_start=on_run_start,
             on_run_end=on_run_end,
+            dispatch=dispatch,
             seeds=seeds,
             snapshots=snapshots,
             dbt_version=dbt_version,
@@ -408,6 +413,7 @@ class PartialProject(RenderComponents):
             selectors=selectors,
             query_comment=query_comment,
             sources=sources,
+            tests=tests,
             vars=vars_value,
             config_version=cfg.config_version,
             unrendered=unrendered,
@@ -510,9 +516,11 @@ class Project:
     models: Dict[str, Any]
     on_run_start: List[str]
     on_run_end: List[str]
+    dispatch: List[Dict[str, Any]]
     seeds: Dict[str, Any]
     snapshots: Dict[str, Any]
     sources: Dict[str, Any]
+    tests: Dict[str, Any]
     vars: VarProvider
     dbt_version: List[VersionSpecifier]
     packages: Dict[str, Any]
@@ -568,9 +576,11 @@ class Project:
             'models': self.models,
             'on-run-start': self.on_run_start,
             'on-run-end': self.on_run_end,
+            'dispatch': self.dispatch,
             'seeds': self.seeds,
             'snapshots': self.snapshots,
             'sources': self.sources,
+            'tests': self.tests,
             'vars': self.vars.to_dict(),
             'require-dbt-version': [
                 v.to_version_string() for v in self.dbt_version
@@ -578,10 +588,11 @@ class Project:
             'config-version': self.config_version,
         })
         if self.query_comment:
-            result['query-comment'] = self.query_comment.to_dict()
+            result['query-comment'] = \
+                self.query_comment.to_dict(omit_none=True)
 
         if with_packages:
-            result.update(self.packages.to_dict())
+            result.update(self.packages.to_dict(omit_none=True))
 
         return result
 
@@ -634,10 +645,27 @@ class Project:
     def hashed_name(self):
         return hashlib.md5(self.project_name.encode('utf-8')).hexdigest()
 
-    def get_selector(self, name: str) -> SelectionSpec:
+    def get_selector(self, name: str) -> Union[SelectionSpec, bool]:
         if name not in self.selectors:
             raise RuntimeException(
                 f'Could not find selector named {name}, expected one of '
                 f'{list(self.selectors)}'
             )
-        return self.selectors[name]
+        return self.selectors[name]["definition"]
+
+    def get_default_selector_name(self) -> Union[str, None]:
+        """This function fetch the default selector to use on `dbt run` (if any)
+        :return: either a selector if default is set or None
+        :rtype: Union[SelectionSpec, None]
+        """
+        for selector_name, selector in self.selectors.items():
+            if selector["default"] is True:
+                return selector_name
+
+        return None
+
+    def get_macro_search_order(self, macro_namespace: str):
+        for dispatch_entry in self.dispatch:
+            if dispatch_entry['macro_namespace'] == macro_namespace:
+                return dispatch_entry['search_order']
+        return None

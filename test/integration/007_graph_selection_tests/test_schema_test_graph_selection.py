@@ -18,7 +18,7 @@ class TestSchemaTestGraphSelection(DBTIntegrationTest):
         return {
             "packages": [
                 {
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project',
+                    'git': 'https://github.com/dbt-labs/dbt-integration-project',
                     'revision': 'dbt/0.17.0',
                 }
             ]
@@ -28,10 +28,10 @@ class TestSchemaTestGraphSelection(DBTIntegrationTest):
         self.run_sql_file("seed.sql")
         self.run_dbt(["deps"])
         results = self.run_dbt(['run', '--exclude', 'never_selected'])
-        self.assertEqual(len(results), 9)
+        self.assertEqual(len(results), 10)
 
         args = FakeArgs()
-        args.models = include
+        args.select = include
         args.exclude = exclude
 
         test_task = TestTask(args, self.config)

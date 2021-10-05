@@ -51,7 +51,7 @@ class BaseSourcesTest(DBTIntegrationTest):
 class SuccessfulSourcesTest(BaseSourcesTest):
     def setUp(self):
         super().setUp()
-        self.run_dbt_with_vars(['seed'], strict=False)
+        self.run_dbt_with_vars(['seed'])
         self.maxDiff = None
         self._id = 101
         # this is the db initial value
@@ -74,8 +74,7 @@ class SuccessfulSourcesTest(BaseSourcesTest):
             'blue',{id},'Jake','abc@example.com','192.168.1.1','{time}'
         )"""
         quoted_columns = ','.join(
-            self.adapter.quote(c) if self.adapter_type != 'bigquery' else c
-            for c in
+            self.adapter.quote(c) for c in
             ('favorite_color', 'id', 'first_name',
              'email', 'ip_address', 'updated_at')
         )
@@ -248,7 +247,7 @@ class TestSourceFreshness(SuccessfulSourcesTest):
         assert isinstance(data['elapsed_time'], float)
         self.assertBetween(data['metadata']['generated_at'],
                            self.freshness_start_time)
-        assert data['metadata']['dbt_schema_version'] == 'https://schemas.getdbt.com/dbt/sources/v1.json'
+        assert data['metadata']['dbt_schema_version'] == 'https://schemas.getdbt.com/dbt/sources/v2.json'
         assert data['metadata']['dbt_version'] == dbt.version.__version__
         assert data['metadata']['invocation_id'] == dbt.tracking.active_user.invocation_id
         key = 'key'
@@ -272,7 +271,21 @@ class TestSourceFreshness(SuccessfulSourcesTest):
                     'warn_after': {'count': 10, 'period': 'hour'},
                     'error_after': {'count': 18, 'period': 'hour'},
                 },
-                'adapter_response': {}
+                'adapter_response': {},
+                'thread_id': AnyStringWith('Thread-'),
+                'execution_time': AnyFloat(),
+                'timing': [
+                    {
+                        'name': 'compile',
+                        'started_at': AnyStringWith(),
+                        'completed_at': AnyStringWith(),
+                    },
+                    {
+                        'name': 'execute',
+                        'started_at': AnyStringWith(),
+                        'completed_at': AnyStringWith(),
+                    }
+                ]
             }
         ])
 
@@ -280,6 +293,42 @@ class TestSourceFreshness(SuccessfulSourcesTest):
         # test_source.test_table should have a loaded_at field of `updated_at`
         # and a freshness of warn_after: 10 hours, error_after: 18 hours
         # by default, our data set is way out of date!
+        self.freshness_start_time = datetime.utcnow()
+        results = self.run_dbt_with_vars(
+            ['source', 'freshness', '-o', 'target/error_source.json'],
+            expect_pass=False
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, 'error')
+        self._assert_freshness_results('target/error_source.json', 'error')
+
+        self._set_updated_at_to(timedelta(hours=-12))
+        self.freshness_start_time = datetime.utcnow()
+        results = self.run_dbt_with_vars(
+            ['source', 'freshness', '-o', 'target/warn_source.json'],
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, 'warn')
+        self._assert_freshness_results('target/warn_source.json', 'warn')
+
+        self._set_updated_at_to(timedelta(hours=-2))
+        self.freshness_start_time = datetime.utcnow()
+        results = self.run_dbt_with_vars(
+            ['source', 'freshness', '-o', 'target/pass_source.json'],
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, 'pass')
+        self._assert_freshness_results('target/pass_source.json', 'pass')
+
+    @use_profile('postgres')
+    def test_postgres_source_freshness(self):
+        self._run_source_freshness()
+
+    @use_profile('postgres')
+    def test_postgres_source_snapshot_freshness(self):
+        """Ensures that the deprecated command `source snapshot-freshness`
+        aliases to `source freshness` command.
+        """
         self.freshness_start_time = datetime.utcnow()
         results = self.run_dbt_with_vars(
             ['source', 'snapshot-freshness', '-o', 'target/error_source.json'],
@@ -308,20 +357,48 @@ class TestSourceFreshness(SuccessfulSourcesTest):
         self._assert_freshness_results('target/pass_source.json', 'pass')
 
     @use_profile('postgres')
-    def test_postgres_source_freshness(self):
-        self._run_source_freshness()
+    def test_postgres_source_freshness_selection_select(self):
+        """Tests node selection using the --select argument."""
+        self._set_updated_at_to(timedelta(hours=-2))
+        self.freshness_start_time = datetime.utcnow()
+        # select source directly
+        results = self.run_dbt_with_vars(
+            ['source', 'freshness', '--select',
+                'source:test_source.test_table', '-o', 'target/pass_source.json'],
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, 'pass')
+        self._assert_freshness_results('target/pass_source.json', 'pass')
 
-    @use_profile('snowflake')
-    def test_snowflake_source_freshness(self):
-        self._run_source_freshness()
+    @use_profile('postgres')
+    def test_postgres_source_freshness_selection_exclude(self):
+        """Tests node selection using the --select argument. It 'excludes' the 
+        only source in the project so it should return no results."""
+        self._set_updated_at_to(timedelta(hours=-2))
+        self.freshness_start_time = datetime.utcnow()
+        # exclude source directly
+        results = self.run_dbt_with_vars(
+            ['source', 'freshness', '--exclude',
+                'source:test_source.test_table', '-o', 'target/exclude_source.json'],
+        )
+        self.assertEqual(len(results), 0)
 
-    @use_profile('redshift')
-    def test_redshift_source_freshness(self):
-        self._run_source_freshness()
-
-    @use_profile('bigquery')
-    def test_bigquery_source_freshness(self):
-        self._run_source_freshness()
+    @use_profile('postgres')
+    def test_postgres_source_freshness_selection_graph_operation(self):
+        """Tests node selection using the --select argument with graph
+        operations. `+descendant_model` == select all nodes `descendant_model`
+        depends on.
+        """
+        self._set_updated_at_to(timedelta(hours=-2))
+        self.freshness_start_time = datetime.utcnow()
+        # select model ancestors
+        results = self.run_dbt_with_vars(
+            ['source', 'freshness', '--select',
+                '+descendant_model', '-o', 'target/ancestor_source.json']
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, 'pass')
+        self._assert_freshness_results('target/ancestor_source.json', 'pass')
 
 
 class TestSourceFreshnessErrors(SuccessfulSourcesTest):
@@ -332,7 +409,7 @@ class TestSourceFreshnessErrors(SuccessfulSourcesTest):
     @use_profile('postgres')
     def test_postgres_error(self):
         results = self.run_dbt_with_vars(
-            ['source', 'snapshot-freshness'],
+            ['source', 'freshness'],
             expect_pass=False
         )
         self.assertEqual(len(results), 1)
@@ -348,18 +425,18 @@ class TestSourceFreshnessFilter(SuccessfulSourcesTest):
     def test_postgres_all_records(self):
         # all records are filtered out
         self.run_dbt_with_vars(
-            ['source', 'snapshot-freshness'], expect_pass=False)
+            ['source', 'freshness'], expect_pass=False)
         # we should insert a record with #101 that's fresh, but will still fail
         # because the filter excludes it
         self._set_updated_at_to(timedelta(hours=-2))
         self.run_dbt_with_vars(
-            ['source', 'snapshot-freshness'], expect_pass=False)
+            ['source', 'freshness'], expect_pass=False)
 
         # we should now insert a record with #102 that's fresh, and the filter
         # includes it
         self._set_updated_at_to(timedelta(hours=-2))
         results = self.run_dbt_with_vars(
-            ['source', 'snapshot-freshness'], expect_pass=True)
+            ['source', 'freshness'], expect_pass=True)
 
 
 class TestMalformedSources(BaseSourcesTest):
@@ -369,14 +446,9 @@ class TestMalformedSources(BaseSourcesTest):
         return "malformed_models"
 
     @use_profile('postgres')
-    def test_postgres_malformed_schema_nonstrict_will_break_run(self):
+    def test_postgres_malformed_schema_will_break_run(self):
         with self.assertRaises(CompilationException):
-            self.run_dbt_with_vars(['seed'], strict=False)
-
-    @use_profile('postgres')
-    def test_postgres_malformed_schema_strict_will_break_run(self):
-        with self.assertRaises(CompilationException):
-            self.run_dbt_with_vars(['seed'], strict=True)
+            self.run_dbt_with_vars(['seed'])
 
 
 class TestRenderingInSourceTests(BaseSourcesTest):
@@ -405,10 +477,5 @@ class TestUnquotedSources(SuccessfulSourcesTest):
 
     @use_profile('postgres')
     def test_postgres_catalog(self):
-        self.run_dbt_with_vars(['run'])
-        self.run_dbt_with_vars(['docs', 'generate'])
-
-    @use_profile('redshift')
-    def test_redshift_catalog(self):
         self.run_dbt_with_vars(['run'])
         self.run_dbt_with_vars(['docs', 'generate'])

@@ -1,15 +1,10 @@
 import json
-from typing import Type
 
 from dbt.contracts.graph.parsed import (
     ParsedExposure,
-    ParsedSourceDefinition,
+    ParsedSourceDefinition
 )
-from dbt.graph import (
-    parse_difference,
-    ResourceTypeSelector,
-    SelectionSpec,
-)
+from dbt.graph import ResourceTypeSelector
 from dbt.task.runnable import GraphRunnableTask, ManifestTask
 from dbt.task.test import TestSelector
 from dbt.node_types import NodeType
@@ -38,11 +33,12 @@ class ListTask(GraphRunnableTask):
         'config',
         'resource_type',
         'source_name',
+        'original_file_path',
+        'unique_id'
     ))
 
     def __init__(self, args, config):
         super().__init__(args, config)
-        self.args.single_threaded = True
         if self.args.models:
             if self.args.select:
                 raise RuntimeException(
@@ -110,8 +106,12 @@ class ListTask(GraphRunnableTask):
         for node in self._iterate_selected_nodes():
             yield json.dumps({
                 k: v
-                for k, v in node.to_dict(options={'keep_none': True}).items()
-                if k in self.ALLOWED_KEYS
+                for k, v in node.to_dict(omit_none=False).items()
+                if (
+                    k in self.args.output_keys
+                    if self.args.output_keys is not None
+                    else k in self.ALLOWED_KEYS
+                )
             })
 
     def generate_paths(self):
@@ -120,7 +120,7 @@ class ListTask(GraphRunnableTask):
 
     def run(self):
         ManifestTask._runtime_initialize(self)
-        output = self.config.args.output
+        output = self.args.output
         if output == 'selector':
             generator = self.generate_selectors
         elif output == 'name':
@@ -133,7 +133,11 @@ class ListTask(GraphRunnableTask):
             raise InternalException(
                 'Invalid output {}'.format(output)
             )
-        for result in generator():
+
+        return self.output_results(generator())
+
+    def output_results(self, results):
+        for result in results:
             self.node_results.append(result)
             print(result)
         return self.node_results
@@ -143,10 +147,10 @@ class ListTask(GraphRunnableTask):
         if self.args.models:
             return [NodeType.Model]
 
-        values = set(self.config.args.resource_types)
-        if not values:
+        if not self.args.resource_types:
             return list(self.DEFAULT_RESOURCE_VALUES)
 
+        values = set(self.args.resource_types)
         if 'default' in values:
             values.remove('default')
             values.update(self.DEFAULT_RESOURCE_VALUES)
@@ -156,25 +160,19 @@ class ListTask(GraphRunnableTask):
         return list(values)
 
     @property
-    def selector(self):
+    def selection_arg(self):
+        # for backwards compatibility, list accepts both --models and --select,
+        # with slightly different behavior: --models implies --resource-type model
         if self.args.models:
             return self.args.models
         else:
             return self.args.select
-
-    def get_selection_spec(self) -> SelectionSpec:
-        if self.args.selector_name:
-            spec = self.config.get_selector(self.args.selector_name)
-        else:
-            spec = parse_difference(self.selector, self.args.exclude)
-        return spec
 
     def get_node_selector(self):
         if self.manifest is None or self.graph is None:
             raise InternalException(
                 'manifest and graph must be set to get perform node selection'
             )
-        cls: Type[ResourceTypeSelector]
         if self.resource_types == [NodeType.Test]:
             return TestSelector(
                 graph=self.graph,

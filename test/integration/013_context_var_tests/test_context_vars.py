@@ -1,3 +1,4 @@
+from dbt.logger import SECRET_ENV_PREFIX
 from test.integration.base import DBTIntegrationTest, use_profile
 
 import os
@@ -15,6 +16,8 @@ class TestContextVars(DBTIntegrationTest):
 
         os.environ["DBT_TEST_013_USER"] = "root"
         os.environ["DBT_TEST_013_PASS"] = "password"
+        os.environ[SECRET_ENV_PREFIX + "013_SECRET"] = "secret_variable"
+        os.environ["DBT_TEST_013_NOT_SECRET"] = "regular_variable"
 
         self.fields = [
             'this',
@@ -138,6 +141,13 @@ class TestContextVars(DBTIntegrationTest):
         self.assertEqual(ctx['target.pass'], '')
         self.assertEqual(ctx['env_var'], '1')
 
+    @use_profile('postgres')
+    def test_postgres_env_vars_secrets(self):
+        os.environ['DBT_DEBUG'] = 'True'
+        _, log_output = self.run_dbt_and_capture(['run', '--target', 'prod'])
+
+        self.assertFalse("secret_variable" in log_output)
+        self.assertTrue("regular_variable" in log_output)
 
 class TestEmitWarning(DBTIntegrationTest):
     @property
@@ -150,9 +160,7 @@ class TestEmitWarning(DBTIntegrationTest):
 
     @use_profile('postgres')
     def test_postgres_warn(self):
-        with pytest.raises(dbt.exceptions.CompilationException):
-            self.run_dbt(['run'], strict=True)
-        self.run_dbt(['run'], strict=False, expect_pass=True)
+        self.run_dbt(['run'], expect_pass=True)
 
 
 class TestVarDependencyInheritance(DBTIntegrationTest):
@@ -190,9 +198,9 @@ class TestVarDependencyInheritance(DBTIntegrationTest):
 
     @use_profile('postgres')
     def test_postgres_var_mutual_overrides_v1_conversion(self):
-        self.run_dbt(['deps'], strict=False)
-        assert len(self.run_dbt(['seed'], strict=False)) == 2
-        assert len(self.run_dbt(['run'], strict=False)) == 2
+        self.run_dbt(['deps'])
+        assert len(self.run_dbt(['seed'])) == 2
+        assert len(self.run_dbt(['run'])) == 2
         self.assertTablesEqual('root_model_expected', 'model')
         self.assertTablesEqual('first_dep_expected', 'first_dep_model')
 

@@ -25,6 +25,10 @@ class UnparsedBaseNode(dbtClassMixin, Replaceable):
     path: str
     original_file_path: str
 
+    @property
+    def file_id(self):
+        return f'{self.package_name}://{self.original_file_path}'
+
 
 @dataclass
 class HasSQL:
@@ -116,14 +120,23 @@ class HasYamlMetadata(dbtClassMixin):
     yaml_key: str
     package_name: str
 
+    @property
+    def file_id(self):
+        return f'{self.package_name}://{self.original_file_path}'
+
 
 @dataclass
-class UnparsedAnalysisUpdate(HasColumnDocs, HasDocs, HasYamlMetadata):
+class HasConfig():
+    config: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UnparsedAnalysisUpdate(HasConfig, HasColumnDocs, HasDocs, HasYamlMetadata):
     pass
 
 
 @dataclass
-class UnparsedNodeUpdate(HasColumnTests, HasTests, HasYamlMetadata):
+class UnparsedNodeUpdate(HasConfig, HasColumnTests, HasTests, HasYamlMetadata):
     quote_columns: Optional[bool] = None
 
 
@@ -135,7 +148,7 @@ class MacroArgument(dbtClassMixin):
 
 
 @dataclass
-class UnparsedMacroUpdate(HasDocs, HasYamlMetadata):
+class UnparsedMacroUpdate(HasConfig, HasDocs, HasYamlMetadata):
     arguments: List[MacroArgument] = field(default_factory=list)
 
 
@@ -231,12 +244,9 @@ class UnparsedSourceTableDefinition(HasColumnTests, HasTests):
     external: Optional[ExternalTable] = None
     tags: List[str] = field(default_factory=list)
 
-    def __post_serialize__(self, dct, options=None):
+    def __post_serialize__(self, dct):
         dct = super().__post_serialize__(dct)
-        keep_none = False
-        if options and 'keep_none' in options and options['keep_none']:
-            keep_none = True
-        if not keep_none and self.freshness is None:
+        if 'freshness' not in dct and self.freshness is None:
             dct['freshness'] = None
         return dct
 
@@ -256,17 +266,15 @@ class UnparsedSourceDefinition(dbtClassMixin, Replaceable):
     loaded_at_field: Optional[str] = None
     tables: List[UnparsedSourceTableDefinition] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
+    config: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def yaml_key(self) -> 'str':
         return 'sources'
 
-    def __post_serialize__(self, dct, options=None):
+    def __post_serialize__(self, dct):
         dct = super().__post_serialize__(dct)
-        keep_none = False
-        if options and 'keep_none' in options and options['keep_none']:
-            keep_none = True
-        if not keep_none and self.freshness is None:
+        if 'freshnewss' not in dct and self.freshness is None:
             dct['freshness'] = None
         return dct
 
@@ -290,7 +298,7 @@ class SourceTablePatch(dbtClassMixin):
     columns: Optional[Sequence[UnparsedColumn]] = None
 
     def to_patch_dict(self) -> Dict[str, Any]:
-        dct = self.to_dict()
+        dct = self.to_dict(omit_none=True)
         remove_keys = ('name')
         for key in remove_keys:
             if key in dct:
@@ -327,7 +335,7 @@ class SourcePatch(dbtClassMixin, Replaceable):
     tags: Optional[List[str]] = None
 
     def to_patch_dict(self) -> Dict[str, Any]:
-        dct = self.to_dict()
+        dct = self.to_dict(omit_none=True)
         remove_keys = ('name', 'overrides', 'tables', 'path')
         for key in remove_keys:
             if key in dct:
@@ -352,6 +360,10 @@ class UnparsedDocumentation(dbtClassMixin, Replaceable):
     root_path: str
     path: str
     original_file_path: str
+
+    @property
+    def file_id(self):
+        return f'{self.package_name}://{self.original_file_path}'
 
     @property
     def resource_type(self):
@@ -419,5 +431,7 @@ class UnparsedExposure(dbtClassMixin, Replaceable):
     owner: ExposureOwner
     description: str = ''
     maturity: Optional[MaturityType] = None
+    meta: Dict[str, Any] = field(default_factory=dict)
+    tags: List[str] = field(default_factory=list)
     url: Optional[str] = None
     depends_on: List[str] = field(default_factory=list)

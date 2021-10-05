@@ -526,8 +526,6 @@ class BaseContext(metaclass=ContextMeta):
 
         The list of valid flags are:
 
-        - `flags.STRICT_MODE`: True if `--strict` (or `-S`) was provided on the
-            command line
         - `flags.FULL_REFRESH`: True if `--full-refresh` was provided on the
             command line
         - `flags.NON_DESTRUCTIVE`: True if `--non-destructive` was provided on
@@ -538,4 +536,5 @@ class BaseContext(metaclass=ContextMeta):
 
 def generate_base_context(cli_vars: Dict[str, Any]) -> Dict[str, Any]:
     ctx = BaseContext(cli_vars)
+    # This is not a Mashumaro to_dict call
     return ctx.to_dict()

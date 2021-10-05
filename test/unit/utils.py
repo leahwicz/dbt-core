@@ -145,7 +145,7 @@ class ContractTestCase(TestCase):
         super().setUp()
 
     def assert_to_dict(self, obj, dct):
-        self.assertEqual(obj.to_dict(), dct)
+        self.assertEqual(obj.to_dict(omit_none=True), dct)
 
     def assert_from_dict(self, obj, dct, cls=None):
         if cls is None:
@@ -184,15 +184,24 @@ def compare_dicts(dict1, dict2):
         print("--- Found no differences in dictionaries")
 
 
-def assert_to_dict(obj, dct):
-    assert obj.to_dict() == dct
-
-
 def assert_from_dict(obj, dct, cls=None):
     if cls is None:
         cls = obj.__class__
     cls.validate(dct)
-    assert cls.from_dict(dct) == obj
+    obj_from_dict = cls.from_dict(dct)
+    if hasattr(obj, 'created_at'):
+        obj_from_dict.created_at = 1
+        obj.created_at = 1
+    assert obj_from_dict == obj
+
+
+def assert_to_dict(obj, dct):
+    obj_to_dict = obj.to_dict(omit_none=True)
+    if 'created_at' in obj_to_dict:
+        obj_to_dict['created_at'] = 1
+    if 'created_at' in dct:
+        dct['created_at'] = 1
+    assert obj_to_dict == dct
 
 
 def assert_symmetric(obj, dct, cls=None):
@@ -343,12 +352,8 @@ def MockDocumentation(package, name, **kwargs):
 
 
 def load_internal_manifest_macros(config, macro_hook = lambda m: None):
-    from dbt.adapters.factory import get_include_paths
     from dbt.parser.manifest import ManifestLoader
-    paths = get_include_paths(config.credentials.type)
-    projects = {k: v for k, v in config.load_dependencies().items() if k.startswith('dbt')}
-    loader = ManifestLoader(config, projects, macro_hook)
-    return loader.load_only_macros()
+    return ManifestLoader.load_macros(config, macro_hook)
 
 
 

@@ -8,27 +8,25 @@ from dbt.dataclass_schema import StrEnum
 from .graph import UniqueId
 
 from dbt.contracts.graph.compiled import (
-    CompiledDataTestNode,
-    CompiledSchemaTestNode,
+    CompiledSingularTestNode,
+    CompiledGenericTestNode,
     CompileResultNode,
     ManifestNode,
 )
 from dbt.contracts.graph.manifest import Manifest, WritableManifest
 from dbt.contracts.graph.parsed import (
     HasTestMetadata,
-    ParsedDataTestNode,
+    ParsedSingularTestNode,
     ParsedExposure,
-    ParsedSchemaTestNode,
+    ParsedGenericTestNode,
     ParsedSourceDefinition,
 )
 from dbt.contracts.state import PreviousState
-from dbt.logger import GLOBAL_LOGGER as logger
 from dbt.exceptions import (
     InternalException,
     RuntimeException,
 )
 from dbt.node_types import NodeType
-from dbt.ui import warning_tag
 
 
 SELECTOR_GLOB = '*'
@@ -49,25 +47,23 @@ class MethodName(StrEnum):
     Exposure = 'exposure'
 
 
-def is_selected_node(real_node, node_selector):
-    for i, selector_part in enumerate(node_selector):
+def is_selected_node(fqn: List[str], node_selector: str):
 
-        is_last = (i == len(node_selector) - 1)
+    # If qualified_name exactly matches model name (fqn's leaf), return True
+    if fqn[-1] == node_selector:
+        return True
+    # Flatten node parts. Dots in model names act as namespace separators
+    flat_fqn = [item for segment in fqn for item in segment.split('.')]
+    # Selector components cannot be more than fqn's
+    if len(flat_fqn) < len(node_selector.split('.')):
+        return False
 
+    for i, selector_part in enumerate(node_selector.split('.')):
         # if we hit a GLOB, then this node is selected
         if selector_part == SELECTOR_GLOB:
             return True
-
-        # match package.node_name or package.dir.node_name
-        elif is_last and selector_part == real_node[-1]:
-            return True
-
-        elif len(real_node) <= i:
-            return False
-
-        elif real_node[i] == selector_part:
+        elif flat_fqn[i] == selector_part:
             continue
-
         else:
             return False
 
@@ -154,31 +150,20 @@ class SelectorMethod(metaclass=abc.ABCMeta):
 
 
 class QualifiedNameSelectorMethod(SelectorMethod):
-    def node_is_match(
-        self,
-        qualified_name: List[str],
-        package_names: Set[str],
-        fqn: List[str],
-    ) -> bool:
-        """Determine if a qualfied name matches an fqn, given the set of package
+    def node_is_match(self, qualified_name: str, fqn: List[str]) -> bool:
+        """Determine if a qualified name matches an fqn for all package
         names in the graph.
 
-        :param List[str] qualified_name: The components of the selector or node
-            name, split on '.'.
-        :param Set[str] package_names: The set of pacakge names in the graph.
+        :param str qualified_name: The qualified name to match the nodes with
         :param List[str] fqn: The node's fully qualified name in the graph.
         """
-        if len(qualified_name) == 1 and fqn[-1] == qualified_name[0]:
+        unscoped_fqn = fqn[1:]
+
+        if is_selected_node(fqn, qualified_name):
             return True
-
-        if qualified_name[0] in package_names:
-            if is_selected_node(fqn, qualified_name):
-                return True
-
-        for package_name in package_names:
-            local_qualified_node_name = [package_name] + qualified_name
-            if is_selected_node(fqn, local_qualified_node_name):
-                return True
+        # Match nodes across different packages
+        elif is_selected_node(unscoped_fqn, qualified_name):
+            return True
 
         return False
 
@@ -189,15 +174,9 @@ class QualifiedNameSelectorMethod(SelectorMethod):
 
         :param str selector: The selector or node name
         """
-        qualified_name = selector.split(".")
         parsed_nodes = list(self.parsed_nodes(included_nodes))
-        package_names = {n.package_name for _, n in parsed_nodes}
         for node, real_node in parsed_nodes:
-            if self.node_is_match(
-                qualified_name,
-                package_names,
-                real_node.fqn,
-            ):
+            if self.node_is_match(selector, real_node.fqn):
                 yield node
 
 
@@ -382,14 +361,15 @@ class TestTypeSelectorMethod(SelectorMethod):
         self, included_nodes: Set[UniqueId], selector: str
     ) -> Iterator[UniqueId]:
         search_types: Tuple[Type, ...]
-        if selector == 'schema':
-            search_types = (ParsedSchemaTestNode, CompiledSchemaTestNode)
-        elif selector == 'data':
-            search_types = (ParsedDataTestNode, CompiledDataTestNode)
+        # continue supporting 'schema' + 'data' for backwards compatibility
+        if selector in ('generic', 'schema'):
+            search_types = (ParsedGenericTestNode, CompiledGenericTestNode)
+        elif selector in ('singular', 'data'):
+            search_types = (ParsedSingularTestNode, CompiledSingularTestNode)
         else:
             raise RuntimeException(
-                f'Invalid test type selector {selector}: expected "data" or '
-                '"schema"'
+                f'Invalid test type selector {selector}: expected "generic" or '
+                '"singular"'
             )
 
         for node, real_node in self.parsed_nodes(included_nodes):
@@ -400,7 +380,7 @@ class TestTypeSelectorMethod(SelectorMethod):
 class StateSelectorMethod(SelectorMethod):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.macros_were_modified: Optional[List[str]] = None
+        self.modified_macros: Optional[List[str]] = None
 
     def _macros_modified(self) -> List[str]:
         # we checked in the caller!
@@ -413,44 +393,85 @@ class StateSelectorMethod(SelectorMethod):
 
         modified = []
         for uid, macro in new_macros.items():
-            name = f'{macro.package_name}.{macro.name}'
             if uid in old_macros:
                 old_macro = old_macros[uid]
                 if macro.macro_sql != old_macro.macro_sql:
-                    modified.append(f'{name} changed')
+                    modified.append(uid)
             else:
-                modified.append(f'{name} added')
+                modified.append(uid)
 
         for uid, macro in old_macros.items():
             if uid not in new_macros:
-                modified.append(f'{macro.package_name}.{macro.name} removed')
+                modified.append(uid)
 
-        return modified[:3]
+        return modified
 
-    def check_modified(
-        self,
-        old: Optional[SelectorTarget],
-        new: SelectorTarget,
+    def recursively_check_macros_modified(self, node, previous_macros):
+        # loop through all macros that this node depends on
+        for macro_uid in node.depends_on.macros:
+            # avoid infinite recursion if we've already seen this macro
+            if macro_uid in previous_macros:
+                continue
+            previous_macros.append(macro_uid)
+            # is this macro one of the modified macros?
+            if macro_uid in self.modified_macros:
+                return True
+            # if not, and this macro depends on other macros, keep looping
+            macro_node = self.manifest.macros[macro_uid]
+            if len(macro_node.depends_on.macros) > 0:
+                return self.recursively_check_macros_modified(macro_node, previous_macros)
+            else:
+                return False
+
+    def check_macros_modified(self, node):
+        # check if there are any changes in macros the first time
+        if self.modified_macros is None:
+            self.modified_macros = self._macros_modified()
+        # no macros have been modified, skip looping entirely
+        if not self.modified_macros:
+            return False
+        # recursively loop through upstream macros to see if any is modified
+        else:
+            previous_macros = []
+            return self.recursively_check_macros_modified(node, previous_macros)
+
+    def check_modified(self, old: Optional[SelectorTarget], new: SelectorTarget) -> bool:
+        different_contents = not new.same_contents(old)  # type: ignore
+        upstream_macro_change = self.check_macros_modified(new)
+        return different_contents or upstream_macro_change
+
+    def check_modified_body(self, old: Optional[SelectorTarget], new: SelectorTarget) -> bool:
+        if hasattr(new, "same_body"):
+            return not new.same_body(old)  # type: ignore
+        else:
+            return False
+
+    def check_modified_configs(self, old: Optional[SelectorTarget], new: SelectorTarget) -> bool:
+        if hasattr(new, "same_config"):
+            return not new.same_config(old)  # type: ignore
+        else:
+            return False
+
+    def check_modified_persisted_descriptions(
+        self, old: Optional[SelectorTarget], new: SelectorTarget
     ) -> bool:
-        # check if there are any changes in macros, if so, log a warning the
-        # first time
-        if self.macros_were_modified is None:
-            self.macros_were_modified = self._macros_modified()
-            if self.macros_were_modified:
-                log_str = ', '.join(self.macros_were_modified)
-                logger.warning(warning_tag(
-                    f'During a state comparison, dbt detected a change in '
-                    f'macros. This will not be marked as a modification. Some '
-                    f'macros: {log_str}'
-                ))
+        if hasattr(new, "same_persisted_description"):
+            return not new.same_persisted_description(old)  # type: ignore
+        else:
+            return False
 
-        return not new.same_contents(old)  # type: ignore
-
-    def check_new(
-        self,
-        old: Optional[SelectorTarget],
-        new: SelectorTarget,
+    def check_modified_relation(
+        self, old: Optional[SelectorTarget], new: SelectorTarget
     ) -> bool:
+        if hasattr(new, "same_database_representation"):
+            return not new.same_database_representation(old)  # type: ignore
+        else:
+            return False
+
+    def check_modified_macros(self, _, new: SelectorTarget) -> bool:
+        return self.check_macros_modified(new)
+
+    def check_new(self, old: Optional[SelectorTarget], new: SelectorTarget) -> bool:
         return old is None
 
     def search(
@@ -462,8 +483,15 @@ class StateSelectorMethod(SelectorMethod):
             )
 
         state_checks = {
+            # it's new if there is no old version
+            'new': lambda old, _: old is None,
+            # use methods defined above to compare properties of old + new
             'modified': self.check_modified,
-            'new': self.check_new,
+            'modified.body': self.check_modified_body,
+            'modified.configs': self.check_modified_configs,
+            'modified.persisted_descriptions': self.check_modified_persisted_descriptions,
+            'modified.relation': self.check_modified_relation,
+            'modified.macros': self.check_modified_macros,
         }
         if selector in state_checks:
             checker = state_checks[selector]

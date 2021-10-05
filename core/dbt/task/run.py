@@ -16,7 +16,6 @@ from .printer import (
     get_counts,
 )
 
-from dbt import deprecations
 from dbt import tracking
 from dbt import utils
 from dbt.adapters.base import BaseRelation
@@ -117,7 +116,7 @@ def track_model_run(index, num_nodes, run_model_result):
         "hashed_contents": utils.get_hashed_contents(
             run_model_result.node
         ),
-        "timing": [t.to_dict() for t in run_model_result.timing],
+        "timing": [t.to_dict(omit_none=True) for t in run_model_result.timing],
     })
 
 
@@ -193,7 +192,7 @@ class ModelRunner(CompileRunner):
         result = context['load_result']('main')
         adapter_response = {}
         if isinstance(result.response, dbtClassMixin):
-            adapter_response = result.response.to_dict()
+            adapter_response = result.response.to_dict(omit_none=True)
         return RunResult(
             node=model,
             status=RunStatus.Success,
@@ -201,18 +200,20 @@ class ModelRunner(CompileRunner):
             thread_id=threading.current_thread().name,
             execution_time=0,
             message=str(result.response),
-            adapter_response=adapter_response
+            adapter_response=adapter_response,
+            failures=result.get('failures')
         )
 
     def _materialization_relations(
         self, result: Any, model
     ) -> List[BaseRelation]:
         if isinstance(result, str):
-            deprecations.warn('materialization-return',
-                              materialization=model.get_materialization())
-            return [
-                self.adapter.Relation.create_from(self.config, model)
-            ]
+            msg = (
+                'The materialization ("{}") did not explicitly return a '
+                'list of relations to add to the cache.'
+                .format(str(model.get_materialization()))
+            )
+            raise CompilationException(msg, node=model)
 
         if isinstance(result, dict):
             return _validate_materialization_relations_dict(result, model)
@@ -451,7 +452,7 @@ class RunTask(CompileTask):
             resource_types=[NodeType.Model],
         )
 
-    def get_runner_type(self):
+    def get_runner_type(self, _):
         return ModelRunner
 
     def task_end_messages(self, results):

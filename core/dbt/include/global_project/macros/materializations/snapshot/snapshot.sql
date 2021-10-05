@@ -2,7 +2,7 @@
     Add new columns to the table if applicable
 #}
 {% macro create_columns(relation, columns) %}
-  {{ adapter.dispatch('create_columns')(relation, columns) }}
+  {{ adapter.dispatch('create_columns', 'dbt')(relation, columns) }}
 {% endmacro %}
 
 {% macro default__create_columns(relation, columns) %}
@@ -15,7 +15,7 @@
 
 
 {% macro post_snapshot(staging_relation) %}
-  {{ adapter.dispatch('post_snapshot')(staging_relation) }}
+  {{ adapter.dispatch('post_snapshot', 'dbt')(staging_relation) }}
 {% endmacro %}
 
 {% macro default__post_snapshot(staging_relation) %}
@@ -262,6 +262,10 @@
   {% endcall %}
 
   {% do persist_docs(target_relation, model) %}
+
+  {% if not target_relation_exists %}
+    {% do create_indexes(target_relation) %}
+  {% endif %}
 
   {{ run_hooks(post_hooks, inside_transaction=True) }}
 

@@ -14,7 +14,6 @@ from dbt.version import __version__
 from dbt.tracking import get_invocation_id
 from dbt.dataclass_schema import dbtClassMixin
 
-MacroKey = Tuple[str, str]
 SourceKey = Tuple[str, str]
 
 
@@ -58,7 +57,7 @@ class Mergeable(Replaceable):
 class Writable:
     def write(self, path: str):
         write_json(
-            path, self.to_dict(options={'keep_none': True})  # type: ignore
+            path, self.to_dict(omit_none=False)  # type: ignore
         )
 
 
@@ -74,7 +73,7 @@ class AdditionalPropertiesMixin:
     # not in the class definitions and puts them in an
     # _extra dict in the class
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
+    def __pre_deserialize__(cls, data):
         # dir() did not work because fields with
         # metadata settings are not found
         # The original version of this would create the
@@ -93,18 +92,18 @@ class AdditionalPropertiesMixin:
             else:
                 new_dict[key] = value
         data = new_dict
-        data = super().__pre_deserialize__(data, options=options)
+        data = super().__pre_deserialize__(data)
         return data
 
-    def __post_serialize__(self, dct, options=None):
-        data = super().__post_serialize__(dct, options=options)
+    def __post_serialize__(self, dct):
+        data = super().__post_serialize__(dct)
         data.update(self.extra)
         if '_extra' in data:
             del data['_extra']
         return data
 
     def replace(self, **kwargs):
-        dct = self.to_dict(options={'keep_none': True})
+        dct = self.to_dict(omit_none=False)
         dct.update(kwargs)
         return self.from_dict(dct)
 
@@ -170,6 +169,12 @@ class BaseArtifactMetadata(dbtClassMixin):
         default_factory=get_invocation_id
     )
     env: Dict[str, str] = dataclasses.field(default_factory=get_metadata_env)
+
+    def __post_serialize__(self, dct):
+        dct = super().__post_serialize__(dct)
+        if dct['generated_at'] and dct['generated_at'].endswith('+00:00'):
+            dct['generated_at'] = dct['generated_at'].replace('+00:00', '') + "Z"
+        return dct
 
 
 def schema_version(name: str, version: int):

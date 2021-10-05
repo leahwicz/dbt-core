@@ -99,17 +99,12 @@ class TestDocsGenerate(DBTIntegrationTest):
     setup_alternate_db = True
 
     def adapter_case(self, value):
-        if self.adapter_type == 'snowflake':
-            return value.upper()
-        else:
-            return value.lower()
+        return value.lower()
 
     def setUp(self):
         super().setUp()
         self.maxDiff = None
         self.alternate_schema = self.unique_schema() + '_test'
-        if self.adapter_type == 'snowflake':
-            self.alternate_schema = self.alternate_schema.upper()
 
         self._created_schemas.add(self.alternate_schema)
         os.environ['DBT_ENV_CUSTOM_ENV_env_key'] = 'env_value'
@@ -129,17 +124,6 @@ class TestDocsGenerate(DBTIntegrationTest):
     @property
     def models(self):
         return self.dir("models")
-
-    @property
-    def packages_config(self):
-        return {
-            'packages': [
-                {
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project',
-                    'revision': 'dbt/0.17.0',
-                },
-            ],
-        }
 
     @property
     def project_config(self):
@@ -191,159 +175,6 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'include': False,
             },
         }
-
-    def _redshift_stats(self):
-        return {
-            "has_stats": {
-                "id": "has_stats",
-                "label": "Has Stats?",
-                "value": True,
-                "description": "Indicates whether there are statistics for this table",
-                "include": False
-            },
-            "encoded": {
-                "id": "encoded",
-                "label": "Encoded",
-                "value": "Y",
-                "description": "Indicates whether any column in the table has compression encoding defined.",
-                "include": True
-            },
-            "diststyle": {
-                "id": "diststyle",
-                "label": "Dist Style",
-                "value": AnyStringWith('AUTO'),
-                "description": "Distribution style or distribution key column, if key distribution is defined.",
-                "include": True
-            },
-            "max_varchar": {
-                "id": "max_varchar",
-                "label": "Max Varchar",
-                "value": AnyFloat(),
-                "description": "Size of the largest column that uses a VARCHAR data type.",
-                "include": True
-            },
-            "size": {
-                "id": "size",
-                "label": "Approximate Size",
-                "value": AnyFloat(),
-                "description": "Approximate size of the table, calculated from a count of 1MB blocks",
-                "include": True
-            },
-            'sortkey1': {
-                'id': 'sortkey1',
-                'label': 'Sort Key 1',
-                'value': AnyStringWith('AUTO'),
-                'description': 'First column in the sort key.',
-                'include': True,
-            },
-            "pct_used": {
-                "id": "pct_used",
-                "label": "Disk Utilization",
-                "value": AnyFloat(),
-                "description": "Percent of available space that is used by the table.",
-                "include": True
-            },
-            "stats_off": {
-                "id": "stats_off",
-                "label": "Stats Off",
-                "value": AnyFloat(),
-                "description": "Number that indicates how stale the table statistics are; 0 is current, 100 is out of date.",
-                "include": True
-            },
-            "rows": {
-                "id": "rows",
-                "label": "Approximate Row Count",
-                "value": AnyFloat(),
-                "description": "Approximate number of rows in the table. This value includes rows marked for deletion, but not yet vacuumed.",
-                "include": True
-            },
-        }
-
-    def _snowflake_stats(self):
-        return {
-            'has_stats': {
-                'id': 'has_stats',
-                'label': 'Has Stats?',
-                'value': True,
-                'description': 'Indicates whether there are statistics for this table',
-                'include': False,
-            },
-            'bytes': {
-                'id': 'bytes',
-                'label': 'Approximate Size',
-                'value': AnyFloat(),
-                'description': 'Approximate size of the table as reported by Snowflake',
-                'include': True,
-            },
-            'last_modified': {
-                'id': 'last_modified',
-                'label': 'Last Modified',
-                'value': AnyString(),
-                'description': 'The timestamp for last update/change',
-                'include': True,
-            },
-            'row_count': {
-                'id': 'row_count',
-                'label': 'Row Count',
-                'value': 1.0,
-                'description': 'An approximate count of rows in this table',
-                'include': True,
-            }
-        }
-
-    def _bigquery_stats(self, is_table, partition=None, cluster=None):
-        stats = {}
-
-        if is_table:
-            stats.update({
-                'num_bytes': {
-                    'id': 'num_bytes',
-                    'label': AnyString(),
-                    'value': AnyFloat(),
-                    'description': AnyString(),
-                    'include': True,
-                },
-                'num_rows': {
-                    'id': 'num_rows',
-                    'label': AnyString(),
-                    'value': AnyFloat(),
-                    'description': AnyString(),
-                    'include': True,
-                }
-            })
-
-        if partition is not None:
-            stats.update({
-                'partitioning_type': {
-                    'id': 'partitioning_type',
-                    'label': AnyString(),
-                    'value': partition,
-                    'description': AnyString(),
-                    'include': True
-                }
-            })
-
-        if cluster is not None:
-            stats.update({
-                'clustering_fields': {
-                    'id': 'clustering_fields',
-                    'label': AnyString(),
-                    'value': cluster,
-                    'description': AnyString(),
-                    'include': True
-                }
-            })
-
-        has_stats = {
-            'id': 'has_stats',
-            'label': 'Has Stats?',
-            'value': bool(stats),
-            'description': 'Indicates whether there are statistics for this table',
-            'include': False,
-        }
-        stats['has_stats'] = has_stats
-
-        return stats
 
     def _expected_catalog(self, id_type, text_type, time_type, view_type,
                           table_type, model_stats, seed_stats=None, case=None,
@@ -461,14 +292,11 @@ class TestDocsGenerate(DBTIntegrationTest):
         )
 
     def get_role(self):
-        if self.adapter_type in {'postgres', 'redshift'}:
+        if self.adapter_type in {'postgres'}:
             profile = self.get_profile(self.adapter_type)
             target_name = profile['test']['target']
             return profile['test']['outputs'][target_name]['user']
-        elif self.adapter_type == 'snowflake':
-            return self.run_sql('select current_role()', fetch='one')[0]
-        else:  # bigquery, presto, other dbs that have no 'role'
-            return None
+        return None
 
     def expected_postgres_references_catalog(self):
         model_database = self.default_database
@@ -581,32 +409,6 @@ class TestDocsGenerate(DBTIntegrationTest):
             },
         }
 
-    def expected_snowflake_catalog(self, case_columns=False):
-        return self._expected_catalog(
-            id_type='NUMBER',
-            text_type='TEXT',
-            time_type='TIMESTAMP_NTZ',
-            view_type='VIEW',
-            table_type='BASE TABLE',
-            model_stats=self._no_stats(),
-            seed_stats=self._snowflake_stats(),
-            case=lambda x: x.upper(),
-            model_database=self.alternative_database,
-            case_columns=case_columns,
-        )
-
-    def expected_bigquery_catalog(self):
-        return self._expected_catalog(
-            id_type='INT64',
-            text_type='STRING',
-            time_type='DATETIME',
-            view_type='view',
-            table_type='table',
-            model_stats=self._bigquery_stats(False),
-            seed_stats=self._bigquery_stats(True),
-            model_database=self.alternative_database,
-        )
-
     def expected_presto_catalog(self):
         return self._expected_catalog(
             id_type='integer',
@@ -618,268 +420,6 @@ class TestDocsGenerate(DBTIntegrationTest):
             seed_stats=self._no_stats(),
             model_database=self.default_database,
         )
-
-    @staticmethod
-    def _clustered_bigquery_columns(update_type):
-        return {
-            'id': {
-                'comment': None,
-                'index': 1,
-                'name': 'id',
-                'type': 'INT64',
-            },
-            'first_name': {
-                'comment': None,
-                'index': 2,
-                'name': 'first_name',
-                'type': 'STRING',
-            },
-            'email': {
-                'comment': None,
-                'index': 3,
-                'name': 'email',
-                'type': 'STRING',
-            },
-            'ip_address': {
-                'comment': None,
-                'index': 4,
-                'name': 'ip_address',
-                'type': 'STRING',
-            },
-            'updated_at': {
-                'comment': None,
-                'index': 5,
-                'name': 'updated_at',
-                'type': update_type,
-            },
-        }
-
-    def expected_bigquery_complex_catalog(self):
-        my_schema_name = self.unique_schema()
-        role = self.get_role()
-        table_stats = self._bigquery_stats(True)
-        clustering_stats = self._bigquery_stats(True, partition='updated_at',
-                                                cluster='first_name')
-        multi_clustering_stats = self._bigquery_stats(True, partition='updated_at',
-                                                      cluster='first_name, email')
-        nesting_columns = {
-            'field_1': {
-                'name': 'field_1',
-                'index': 1,
-                'type': 'INT64',
-                'comment': None
-            },
-            'field_2': {
-                'name': 'field_2',
-                'index': 2,
-                'type': 'INT64',
-                'comment': None
-            },
-            'field_3': {
-                'name': 'field_3',
-                'index': 3,
-                'type': 'INT64',
-                'comment': None
-            },
-            'nested_field': {
-                'name': 'nested_field',
-                'index': 4,
-                'type': 'STRUCT<field_5 INT64, field_6 INT64>',
-                'comment': None
-            },
-            'nested_field.field_5': {
-                'name': 'nested_field.field_5',
-                'index': 5,
-                'type': 'INT64',
-                'comment': None
-            },
-            'nested_field.field_6': {
-                'name': 'nested_field.field_6',
-                'index': 6,
-                'type': 'INT64',
-                'comment': None
-            }
-        }
-
-        return {
-            'nodes': {
-                'model.test.clustered': {
-                    'unique_id': 'model.test.clustered',
-                    'metadata': {
-                        'comment': None,
-                        'name': 'clustered',
-                        'owner': None,
-                        'schema': my_schema_name,
-                        'database': self.default_database,
-                        'type': 'table'
-                    },
-                    'stats': clustering_stats,
-                    'columns': self._clustered_bigquery_columns('DATE'),
-                },
-                'model.test.multi_clustered': {
-                    'unique_id': 'model.test.multi_clustered',
-                    'metadata': {
-                        'comment': None,
-                        'name': 'multi_clustered',
-                        'owner': None,
-                        'schema': my_schema_name,
-                        'database': self.default_database,
-                        'type': 'table'
-                    },
-                    'stats': multi_clustering_stats,
-                    'columns': self._clustered_bigquery_columns('DATE'),
-                },
-                'seed.test.seed': {
-                    'unique_id': 'seed.test.seed',
-                    'metadata': {
-                        'comment': None,
-                        'name': 'seed',
-                        'owner': None,
-                        'schema': my_schema_name,
-                        'database': self.default_database,
-                        'type': 'table',
-                    },
-                    'stats': table_stats,
-                    'columns': self._clustered_bigquery_columns('DATETIME'),
-                },
-                'model.test.nested_view': {
-                    'unique_id': 'model.test.nested_view',
-                    'metadata': {
-                        'schema': my_schema_name,
-                        'database': self.default_database,
-                        'name': 'nested_view',
-                        'type': 'view',
-                        'owner': role,
-                        'comment': None
-                    },
-                    'stats': self._bigquery_stats(False),
-                    'columns': nesting_columns,
-                },
-                'model.test.nested_table': {
-                    'unique_id': 'model.test.nested_table',
-                    'metadata': {
-                        'schema': my_schema_name,
-                        'database': self.default_database,
-                        'name': 'nested_table',
-                        'type': 'table',
-                        'owner': role,
-                        'comment': None
-                    },
-                    'stats': table_stats,
-                    'columns': nesting_columns,
-                },
-            },
-            'sources': {},
-        }
-
-    def expected_redshift_catalog(self):
-        return self._expected_catalog(
-            id_type='integer',
-            text_type=AnyStringWith('character varying'),
-            time_type='timestamp without time zone',
-            view_type='VIEW',
-            table_type='BASE TABLE',
-            model_stats=self._no_stats(),
-            seed_stats=self._redshift_stats(),
-        )
-
-    def expected_redshift_incremental_catalog(self):
-        my_schema_name = self.unique_schema()
-        role = self.get_role()
-        return {
-            'nodes': {
-                'model.test.model': {
-                    'unique_id': 'model.test.model',
-                    'metadata': {
-                        'schema': my_schema_name,
-                        'database': self.default_database,
-                        'name': 'model',
-                        'type': 'LATE BINDING VIEW',
-                        'comment': None,
-                        'owner': role,
-                    },
-                    # incremental views have no stats
-                    'stats': self._no_stats(),
-                    'columns': {
-                        'id': {
-                            'name': 'id',
-                            'index': 1,
-                            'type': 'integer',
-                            'comment': None,
-                        },
-                        'first_name': {
-                            'name': 'first_name',
-                            'index': 2,
-                            'type': 'character varying(5)',
-                            'comment': None,
-                        },
-                        'email': {
-                            'name': 'email',
-                            'index': 3,
-                            'type': 'character varying(23)',
-                            'comment': None,
-                        },
-                        'ip_address': {
-                            'name': 'ip_address',
-                            'index': 4,
-                            'type': 'character varying(14)',
-                            'comment': None,
-                        },
-                        'updated_at': {
-                            'name': 'updated_at',
-                            'index': 5,
-                            'type': 'timestamp without time zone',
-                            'comment': None,
-                        },
-                    },
-                },
-                'seed.test.seed': {
-                    'unique_id': 'seed.test.seed',
-                    'metadata': {
-                        'schema': my_schema_name,
-                        'database': self.default_database,
-                        'name': 'seed',
-                        'type': 'BASE TABLE',
-                        'comment': None,
-                        'owner': role,
-                    },
-                    'stats': self._redshift_stats(),
-                    'columns': {
-                        'id': {
-                            'name': 'id',
-                            'index': 1,
-                            'type': 'integer',
-                            'comment': None,
-                        },
-                        'first_name': {
-                            'name': 'first_name',
-                            'index': 2,
-                            'type': 'character varying(5)',
-                            'comment': None,
-                        },
-                        'email': {
-                            'name': 'email',
-                            'index': 3,
-                            'type': 'character varying(23)',
-                            'comment': None,
-                        },
-                        'ip_address': {
-                            'name': 'ip_address',
-                            'index': 4,
-                            'type': 'character varying(14)',
-                            'comment': None,
-                        },
-                        'updated_at': {
-                            'name': 'updated_at',
-                            'index': 5,
-                            'type': 'timestamp without time zone',
-                            'comment': None,
-                        },
-                    },
-                },
-            },
-            'sources': {},
-        }
 
     def verify_catalog(self, expected):
         self.assertTrue(os.path.exists('./target/catalog.json'))
@@ -914,12 +454,13 @@ class TestDocsGenerate(DBTIntegrationTest):
             'materialized': 'view',
             'pre-hook': [],
             'post-hook': [],
-            'vars': {},
             'column_types': {},
             'quoting': {},
             'tags': [],
             'persist_docs': {},
             'full_refresh': None,
+            'on_schema_change': 'ignore',
+            'meta': {},
         }
         result.update(updates)
         return result
@@ -934,15 +475,16 @@ class TestDocsGenerate(DBTIntegrationTest):
             'persist_docs': {},
             'pre-hook': [],
             'post-hook': [],
-            'vars': {},
             'column_types': {},
             'quoting': {},
             'tags': [],
             'quote_columns': True,
             'full_refresh': None,
+            'on_schema_change': 'ignore',
             'database': None,
             'schema': None,
             'alias': None,
+            'meta': {},
         }
         result.update(updates)
         return result
@@ -961,16 +503,17 @@ class TestDocsGenerate(DBTIntegrationTest):
             'materialized': 'snapshot',
             'pre-hook': [],
             'post-hook': [],
-            'vars': {},
             'column_types': {},
             'quoting': {},
             'tags': [],
             'persist_docs': {},
             'full_refresh': None,
+            'on_schema_change': 'ignore',
             'strategy': 'check',
             'check_cols': 'all',
             'unique_key': 'id',
-            'target_schema': None
+            'target_schema': None,
+            'meta': {},
         }
         result.update(updates)
         return result
@@ -987,28 +530,26 @@ class TestDocsGenerate(DBTIntegrationTest):
 
     def rendered_tst_config(self, **updates):
         result = {
-            'column_types': {},
             'enabled': True,
             'materialized': 'test',
-            'persist_docs': {},
-            'post-hook': [],
-            'pre-hook': [],
-            'quoting': {},
-            'vars': {},
             'tags': [],
             'severity': 'ERROR',
-            'full_refresh': None,
+            'store_failures': None,
+            'warn_if': '!= 0',
+            'error_if': '!= 0',
+            'fail_calc': 'count(*)',
+            'where': None,
+            'limit': None,
             'database': None,
-            'schema': None,
+            'schema': 'dbt_test__audit',
             'alias': None,
+            'meta': {},
         }
         result.update(updates)
         return result
 
     def unrendered_tst_config(self, **updates):
-        result = {
-            'severity': 'ERROR',
-        }
+        result = {}
         result.update(updates)
         return result
 
@@ -1023,7 +564,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'path', 'original_file_path', 'package_name',
                 'root_path', 'name', 'unique_id', 'tags', 'resource_type',
                 'depends_on', 'meta', 'description', 'patch_path', 'arguments',
-                'macro_sql', 'docs'
+                'macro_sql', 'docs', 'created_at',
             }
         )
         # Don't compare the sql, just make sure it exists
@@ -1045,6 +586,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'root_path': root_path,
                 'name': 'column_list',
                 'unique_id': 'macro.dbt.column_list',
+                'created_at': ANY,
                 'tags': [],
                 'resource_type': 'macro',
                 'depends_on': {'macros': []},
@@ -1067,6 +609,7 @@ class TestDocsGenerate(DBTIntegrationTest):
         snapshot_path = self.dir(os.path.join('snapshot', 'snapshot_seed.sql'))
 
         my_schema_name = self.unique_schema()
+        test_audit_schema = my_schema_name + '_dbt_test__audit'
 
         if model_database is None:
             model_database = self.alternative_database
@@ -1092,7 +635,7 @@ class TestDocsGenerate(DBTIntegrationTest):
             target_schema=self.alternate_schema
         )
 
-        quote_database = quote_schema = self.adapter_type != 'snowflake'
+        quote_database = quote_schema = True
         relation_name_node_format = self._relation_name_format(
             quote_database, quote_schema, quote_model
         )
@@ -1101,11 +644,13 @@ class TestDocsGenerate(DBTIntegrationTest):
         )
 
         return {
-            'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v1.json',
+            'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v3.json',
             'dbt_version': dbt.version.__version__,
             'nodes': {
                 'model.test.model': {
-                    'build_path': Normalized('target/compiled/test/models/model.sql'),
+                    'compiled_path': Normalized('target/compiled/test/models/model.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'name': 'model',
                     'root_path': self.test_root_realpath,
                     'relation_name': relation_name_node_format.format(
@@ -1171,7 +716,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                             'tags': [],
                         },
                     },
-                    'patch_path': model_schema_yml_path,
+                    'patch_path': 'test://' + model_schema_yml_path,
                     'docs': {'show': False},
                     'compiled': True,
                     'compiled_sql': ANY,
@@ -1181,7 +726,9 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'unrendered_config': unrendered_model_config,
                 },
                 'model.test.second_model': {
-                    'build_path': Normalized('target/compiled/test/models/second_model.sql'),
+                    'compiled_path': Normalized('target/compiled/test/models/second_model.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'name': 'second_model',
                     'root_path': self.test_root_realpath,
                     'relation_name': relation_name_node_format.format(
@@ -1248,7 +795,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                             'tags': [],
                         },
                     },
-                    'patch_path': model_schema_yml_path,
+                    'patch_path': 'test://' + model_schema_yml_path,
                     'docs': {'show': False},
                     'compiled': True,
                     'compiled_sql': ANY,
@@ -1258,11 +805,13 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'unrendered_config': unrendered_second_config
                 },
                 'seed.test.seed': {
+                    'compiled_path': None,
                     'build_path': None,
+                    'created_at': ANY,
                     'compiled': True,
                     'compiled_sql': '',
                     'config': seed_config,
-                    'patch_path': seed_schema_yml_path,
+                    'patch_path': 'test://' + seed_schema_yml_path,
                     'path': 'seed.csv',
                     'name': 'seed',
                     'root_path': self.test_root_realpath,
@@ -1335,38 +884,40 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'checksum': self._checksum_file(seed_path),
                     'unrendered_config': unrendered_seed_config,
                 },
-                'test.test.not_null_model_id': {
+                'test.test.not_null_model_id.d01cc630e6': {
                     'alias': 'not_null_model_id',
-                    'build_path': Normalized('target/compiled/test/models/schema.yml/schema_test/not_null_model_id.sql'),
+                    'compiled_path': Normalized('target/compiled/test/models/schema.yml/not_null_model_id.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'column_name': 'id',
                     'columns': {},
                     'config': test_config,
                     'sources': [],
                     'depends_on': {
-                        'macros': ['macro.dbt.test_not_null'],
+                        'macros': ['macro.dbt.test_not_null', 'macro.dbt.get_where_subquery'],
                         'nodes': ['model.test.model'],
                     },
                     'deferred': False,
                     'description': '',
-                    'fqn': ['test', 'schema_test', 'not_null_model_id'],
+                    'fqn': ['test', 'not_null_model_id'],
                     'name': 'not_null_model_id',
                     'original_file_path': model_schema_yml_path,
                     'package_name': 'test',
                     'patch_path': None,
-                    'path': Normalized('schema_test/not_null_model_id.sql'),
-                    'raw_sql': "{{ config(severity='ERROR') }}{{ test_not_null(**_dbt_schema_test_kwargs) }}",
+                    'path': Normalized('not_null_model_id.sql'),
+                    'raw_sql': "{{ test_not_null(**_dbt_generic_test_kwargs) }}",
                     'refs': [['model']],
                     'relation_name': None,
                     'resource_type': 'test',
                     'root_path': self.test_root_realpath,
-                    'schema': my_schema_name,
+                    'schema': test_audit_schema,
                     'database': self.default_database,
-                    'tags': ['schema'],
+                    'tags': [],
                     'meta': {},
-                    'unique_id': 'test.test.not_null_model_id',
+                    'unique_id': 'test.test.not_null_model_id.d01cc630e6',
                     'docs': {'show': True},
                     'compiled': True,
-                    'compiled_sql': AnyStringWith('count(*)'),
+                    'compiled_sql': AnyStringWith('where id is null'),
                     'extra_ctes_injected': True,
                     'extra_ctes': [],
                     'test_metadata': {
@@ -1374,7 +925,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                         'name': 'not_null',
                         'kwargs': {
                             'column_name': 'id',
-                            'model': "{{ ref('model') }}",
+                            'model': "{{ get_where_subquery(ref('model')) }}",
                         },
                     },
                     'checksum': {'name': 'none', 'checksum': ''},
@@ -1382,7 +933,9 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'snapshot.test.snapshot_seed': {
                     'alias': 'snapshot_seed',
+                    'compiled_path': None,
                     'build_path': None,
+                    'created_at': ANY,
                     'checksum': self._checksum_file(snapshot_path),
                     'columns': {},
                     'compiled': True,
@@ -1422,35 +975,37 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'unique_id': 'snapshot.test.snapshot_seed',
                     'unrendered_config': unrendered_snapshot_config,
                 },
-                'test.test.test_nothing_model_': {
+                'test.test.test_nothing_model_.5d38568946': {
                     'alias': 'test_nothing_model_',
-                    'build_path': Normalized('target/compiled/test/models/schema.yml/schema_test/test_nothing_model_.sql'),
+                    'compiled_path': Normalized('target/compiled/test/models/schema.yml/test_nothing_model_.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'column_name': None,
                     'columns': {},
                     'config': test_config,
                     'sources': [],
                     'depends_on': {
-                        'macros': ['macro.test.test_nothing'],
+                        'macros': ['macro.test.test_nothing', 'macro.dbt.get_where_subquery'],
                         'nodes': ['model.test.model'],
                     },
                     'deferred': False,
                     'description': '',
-                    'fqn': ['test', 'schema_test', 'test_nothing_model_'],
+                    'fqn': ['test', 'test_nothing_model_'],
                     'name': 'test_nothing_model_',
                     'original_file_path': model_schema_yml_path,
                     'package_name': 'test',
                     'patch_path': None,
-                    'path': normalize('schema_test/test_nothing_model_.sql'),
-                    'raw_sql': "{{ config(severity='ERROR') }}{{ test.test_nothing(**_dbt_schema_test_kwargs) }}",
+                    'path': normalize('test_nothing_model_.sql'),
+                    'raw_sql': "{{ test.test_nothing(**_dbt_generic_test_kwargs) }}",
                     'refs': [['model']],
                     'relation_name': None,
                     'resource_type': 'test',
                     'root_path': self.test_root_realpath,
-                    'schema': my_schema_name,
+                    'schema': test_audit_schema,
                     'database': self.default_database,
-                    'tags': ['schema'],
+                    'tags': [],
                     'meta': {},
-                    'unique_id': 'test.test.test_nothing_model_',
+                    'unique_id': 'test.test.test_nothing_model_.5d38568946',
                     'docs': {'show': True},
                     'compiled': True,
                     'compiled_sql': AnyStringWith('select 0'),
@@ -1460,41 +1015,43 @@ class TestDocsGenerate(DBTIntegrationTest):
                         'namespace': 'test',
                         'name': 'nothing',
                         'kwargs': {
-                            'model': "{{ ref('model') }}",
+                            'model': "{{ get_where_subquery(ref('model')) }}",
                         },
                     },
                     'checksum': {'name': 'none', 'checksum': ''},
                     'unrendered_config': unrendered_test_config,
                 },
-                'test.test.unique_model_id': {
+                'test.test.unique_model_id.67b76558ff': {
                     'alias': 'unique_model_id',
-                    'build_path': Normalized('target/compiled/test/models/schema.yml/schema_test/unique_model_id.sql'),
+                    'compiled_path': Normalized('target/compiled/test/models/schema.yml/unique_model_id.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'column_name': 'id',
                     'columns': {},
                     'config': test_config,
                     'sources': [],
                     'depends_on': {
-                        'macros': ['macro.dbt.test_unique'],
+                        'macros': ['macro.dbt.test_unique', 'macro.dbt.get_where_subquery'],
                         'nodes': ['model.test.model'],
                     },
                     'deferred': False,
                     'description': '',
-                    'fqn': ['test', 'schema_test', 'unique_model_id'],
+                    'fqn': ['test', 'unique_model_id'],
                     'name': 'unique_model_id',
                     'original_file_path': model_schema_yml_path,
                     'package_name': 'test',
                     'patch_path': None,
-                    'path': normalize('schema_test/unique_model_id.sql'),
-                    'raw_sql': "{{ config(severity='ERROR') }}{{ test_unique(**_dbt_schema_test_kwargs) }}",
+                    'path': normalize('unique_model_id.sql'),
+                    'raw_sql': "{{ test_unique(**_dbt_generic_test_kwargs) }}",
                     'refs': [['model']],
                     'relation_name': None,
                     'resource_type': 'test',
                     'root_path': self.test_root_realpath,
-                    'schema': my_schema_name,
+                    'schema': test_audit_schema,
                     'database': self.default_database,
-                    'tags': ['schema'],
+                    'tags': [],
                     'meta': {},
-                    'unique_id': 'test.test.unique_model_id',
+                    'unique_id': 'test.test.unique_model_id.67b76558ff',
                     'docs': {'show': True},
                     'compiled': True,
                     'compiled_sql': AnyStringWith('count(*)'),
@@ -1505,7 +1062,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                         'name': 'unique',
                         'kwargs': {
                             'column_name': 'id',
-                            'model': "{{ ref('model') }}",
+                            'model': "{{ get_where_subquery(ref('model')) }}",
                         },
                     },
                     'checksum': {'name': 'none', 'checksum': ''},
@@ -1514,6 +1071,7 @@ class TestDocsGenerate(DBTIntegrationTest):
             },
             'sources': {
                 'source.test.my_source.my_table': {
+                    'created_at': ANY,
                     'columns': {
                         'id': {
                             'description': 'An ID field',
@@ -1563,6 +1121,7 @@ class TestDocsGenerate(DBTIntegrationTest):
             },
             'exposures': {
                 'exposure.test.notebook_exposure': {
+                    'created_at': ANY,
                     'depends_on': {
                         'macros': [],
                         'nodes': ['model.test.model', 'model.test.second_model']
@@ -1570,6 +1129,8 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'description': 'A description of the complex exposure\n',
                     'fqn': ['test', 'notebook_exposure'],
                     'maturity': 'medium',
+                    'meta': {'tool': 'my_tool', 'languages': ['python']},
+                    'tags': ['my_department'],
                     'name': 'notebook_exposure',
                     'original_file_path': self.dir('models/schema.yml'),
                     'owner': {
@@ -1587,6 +1148,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'url': 'http://example.com/notebook/1'
                 },
                 'exposure.test.simple_exposure': {
+                    'created_at': ANY,
                     'depends_on': {
                         'macros': [],
                         'nodes': [
@@ -1612,6 +1174,8 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'unique_id': 'exposure.test.simple_exposure',
                     'url': None,
                     'maturity': None,
+                    'meta': {},
+                    'tags': []
                 }
             },
             'selectors': {},
@@ -1623,17 +1187,17 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'seed.test.seed': [],
                 'snapshot.test.snapshot_seed': ['seed.test.seed'],
                 'source.test.my_source.my_table': [],
-                'test.test.not_null_model_id': ['model.test.model'],
-                'test.test.test_nothing_model_': ['model.test.model'],
-                'test.test.unique_model_id': ['model.test.model'],
+                'test.test.not_null_model_id.d01cc630e6': ['model.test.model'],
+                'test.test.test_nothing_model_.5d38568946': ['model.test.model'],
+                'test.test.unique_model_id.67b76558ff': ['model.test.model'],
             },
             'child_map': {
                 'model.test.model': [
                     'exposure.test.notebook_exposure',
                     'exposure.test.simple_exposure',
-                    'test.test.not_null_model_id',
-                    'test.test.test_nothing_model_',
-                    'test.test.unique_model_id',
+                    'test.test.not_null_model_id.d01cc630e6',
+                    'test.test.test_nothing_model_.5d38568946',
+                    'test.test.unique_model_id.67b76558ff',
                 ],
                 'model.test.second_model': ['exposure.test.notebook_exposure'],
                 'exposure.test.notebook_exposure': [],
@@ -1643,16 +1207,16 @@ class TestDocsGenerate(DBTIntegrationTest):
                                    'snapshot.test.snapshot_seed'],
                 'snapshot.test.snapshot_seed': [],
                 'source.test.my_source.my_table': ['exposure.test.simple_exposure'],
-                'test.test.not_null_model_id': [],
-                'test.test.test_nothing_model_': [],
-                'test.test.unique_model_id': [],
+                'test.test.not_null_model_id.d01cc630e6': [],
+                'test.test.test_nothing_model_.5d38568946': [],
+                'test.test.unique_model_id.67b76558ff': [],
             },
             'docs': {
                 'dbt.__overview__': ANY,
                 'test.macro_info': ANY,
                 'test.macro_arg_info': ANY,
             },
-            'disabled': [],
+            'disabled': {},
         }
 
     def expected_postgres_references_manifest(self, model_database=None):
@@ -1667,12 +1231,14 @@ class TestDocsGenerate(DBTIntegrationTest):
         snapshot_path = self.dir('snapshot/snapshot_seed.sql')
 
         return {
-            'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v1.json',
+            'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v3.json',
             'dbt_version': dbt.version.__version__,
             'nodes': {
                 'model.test.ephemeral_copy': {
                     'alias': 'ephemeral_copy',
-                    'build_path': Normalized('target/compiled/test/ref_models/ephemeral_copy.sql'),
+                    'compiled_path': Normalized('target/compiled/test/ref_models/ephemeral_copy.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'columns': {},
                     'config': self.rendered_model_config(materialized='ephemeral'),
                     'sources': [['my_source', 'my_table']],
@@ -1711,7 +1277,9 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'model.test.ephemeral_summary': {
                     'alias': 'ephemeral_summary',
-                    'build_path': Normalized('target/compiled/test/ref_models/ephemeral_summary.sql'),
+                    'compiled_path': Normalized('target/compiled/test/ref_models/ephemeral_summary.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'columns': {
                         'first_name': {
                             'description': 'The first name being summarized',
@@ -1743,7 +1311,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'name': 'ephemeral_summary',
                     'original_file_path': ephemeral_summary_path,
                     'package_name': 'test',
-                    'patch_path': self.dir('ref_models/schema.yml'),
+                    'patch_path': 'test://' + self.dir('ref_models/schema.yml'),
                     'path': 'ephemeral_summary.sql',
                     'raw_sql': LineIndifferent(
                         '{{\n  config(\n    materialized = "table"\n  )\n}}\n\n'
@@ -1771,7 +1339,9 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'model.test.view_summary': {
                     'alias': 'view_summary',
-                    'build_path': Normalized('target/compiled/test/ref_models/view_summary.sql'),
+                    'compiled_path': Normalized('target/compiled/test/ref_models/view_summary.sql'),
+                    'build_path': None,
+                    'created_at': ANY,
                     'columns': {
                         'first_name': {
                             'description': 'The first name being summarized',
@@ -1803,7 +1373,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'name': 'view_summary',
                     'original_file_path': view_summary_path,
                     'package_name': 'test',
-                    'patch_path': self.dir('ref_models/schema.yml'),
+                    'patch_path': 'test://' + self.dir('ref_models/schema.yml'),
                     'path': 'view_summary.sql',
                     'raw_sql': LineIndifferent(
                         '{{\n  config(\n    materialized = "view"\n  )\n}}\n\n'
@@ -1830,7 +1400,9 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'seed.test.seed': {
                     'alias': 'seed',
+                    'compiled_path': None,
                     'build_path': None,
+                    'created_at': ANY,
                     'columns': {
                         'id': {
                             'name': 'id',
@@ -1883,7 +1455,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'name': 'seed',
                     'original_file_path': seed_path,
                     'package_name': 'test',
-                    'patch_path': self.dir('seed/schema.yml'),
+                    'patch_path': 'test://' + self.dir('seed/schema.yml'),
                     'path': 'seed.csv',
                     'raw_sql': '',
                     'refs': [],
@@ -1906,7 +1478,9 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'snapshot.test.snapshot_seed': {
                     'alias': 'snapshot_seed',
+                    'compiled_path': None,
                     'build_path': None,
+                    'created_at': ANY,
                     'checksum': self._checksum_file(snapshot_path),
                     'columns': {},
                     'compiled': True,
@@ -1964,6 +1538,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                         'identifier': True,
                         'column': None,
                     },
+                    'created_at': ANY,
                     'database': self.default_database,
                     'description': 'My table',
                     'external': None,
@@ -1994,6 +1569,7 @@ class TestDocsGenerate(DBTIntegrationTest):
             },
             'exposures': {
                 'exposure.test.notebook_exposure': {
+                    'created_at': ANY,
                     'depends_on': {
                         'macros': [],
                         'nodes': ['model.test.view_summary']
@@ -2001,6 +1577,8 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'description': 'A description of the complex exposure',
                     'fqn': ['test', 'notebook_exposure'],
                     'maturity': 'medium',
+                    'meta': {'tool': 'my_tool', 'languages': ['python']},
+                    'tags': ['my_department'],
                     'name': 'notebook_exposure',
                     'original_file_path': self.dir('ref_models/schema.yml'),
                     'owner': {
@@ -2135,21 +1713,22 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'snapshot.test.snapshot_seed': ['seed.test.seed'],
                 'source.test.my_source.my_table': [],
             },
-            'disabled': [],
+            'disabled': {},
             'macros': {
                 'macro.test.test_nothing': {
                     'name': 'test_nothing',
                     'depends_on': {'macros': []},
+                    'created_at': ANY,
                     'description': 'My custom test that I wrote that does nothing',
                     'docs': {'show': True},
-                    'macro_sql': AnyStringWith('macro test_nothing'),
+                    'macro_sql': AnyStringWith('test nothing'),
                     'original_file_path': self.dir('macros/dummy_test.sql'),
                     'path': self.dir('macros/dummy_test.sql'),
                     'package_name': 'test',
                     'meta': {
                         'some_key': 100,
                     },
-                    'patch_path': self.dir('macros/schema.yml'),
+                    'patch_path': 'test://' + self.dir('macros/schema.yml'),
                     'resource_type': 'macro',
                     'unique_id': 'macro.test.test_nothing',
                     'tags': [],
@@ -2163,456 +1742,6 @@ class TestDocsGenerate(DBTIntegrationTest):
                     ],
                 }
             }
-        }
-
-    def expected_bigquery_complex_manifest(self):
-        nested_view_sql_path = self.dir('bq_models/nested_view.sql')
-        nested_table_sql_path = self.dir('bq_models/nested_table.sql')
-        clustered_sql_path = self.dir('bq_models/clustered.sql')
-        multi_clustered_sql_path = self.dir('bq_models/multi_clustered.sql')
-        seed_path = self.dir('seed/seed.csv')
-        snapshot_path = self.dir('snapshot/snapshot_seed.sql')
-        my_schema_name = self.unique_schema()
-
-        return {
-            'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v1.json',
-            'dbt_version': dbt.version.__version__,
-            'nodes': {
-                'model.test.clustered': {
-                    'alias': 'clustered',
-                    'config': self.rendered_model_config(
-                        cluster_by=['first_name'],
-                        materialized='table',
-                        partition_by={'field': 'updated_at',
-                                      'data_type': 'date'},
-                    ),
-                    'sources': [],
-                    'depends_on': {'macros': [], 'nodes': ['seed.test.seed']},
-                    'fqn': ['test', 'clustered'],
-                    'build_path': Normalized('target/compiled/test/bq_models/clustered.sql'),
-                    'name': 'clustered',
-                    'original_file_path': clustered_sql_path,
-                    'package_name': 'test',
-                    'path': 'clustered.sql',
-                    'raw_sql': LineIndifferent(_read_file(clustered_sql_path).rstrip('\r\n')),
-                    'refs': [['seed']],
-                    'relation_name': '`{0}`.`{1}`.clustered'.format(
-                        self.default_database, my_schema_name
-                    ),
-                    'resource_type': 'model',
-                    'root_path': self.test_root_realpath,
-                    'schema': my_schema_name,
-                    'database': self.default_database,
-                    'tags': [],
-                    'meta': {},
-                    'unique_id': 'model.test.clustered',
-                    'columns': {
-                        'email': {
-                            'description': "The user's email",
-                            'name': 'email',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'first_name': {
-                            'description': "The user's name",
-                            'name': 'first_name',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'id': {
-                            'description': 'The user id',
-                            'name': 'id',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'ip_address': {
-                            'description': "The user's IP address",
-                            'name': 'ip_address',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'updated_at': {
-                            'description': 'When the user was updated',
-                            'name': 'updated_at',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                    },
-                    'deferred': False,
-                    'description': 'A clustered and partitioned copy of the test model',
-                    'patch_path': self.dir('bq_models/schema.yml'),
-                    'docs': {'show': True},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'extra_ctes_injected': True,
-                    'extra_ctes': [],
-                    'checksum': self._checksum_file(clustered_sql_path),
-                    'unrendered_config': self.unrendered_model_config(
-                        cluster_by=['first_name'],
-                        materialized='table',
-                        partition_by={'field': 'updated_at',
-                                      'data_type': 'date'},
-                    ),
-                },
-                'model.test.multi_clustered': {
-                    'alias': 'multi_clustered',
-                    'build_path': Normalized('target/compiled/test/bq_models/multi_clustered.sql'),
-                    'config': self.rendered_model_config(
-                        cluster_by=['first_name', 'email'],
-                        materialized='table',
-                        partition_by={'field': 'updated_at',
-                                      'data_type': 'date'}
-                    ),
-                    'sources': [],
-                    'depends_on': {'macros': [], 'nodes': ['seed.test.seed']},
-                    'fqn': ['test', 'multi_clustered'],
-                    'name': 'multi_clustered',
-                    'original_file_path': multi_clustered_sql_path,
-                    'package_name': 'test',
-                    'path': 'multi_clustered.sql',
-                    'raw_sql': LineIndifferent(_read_file(multi_clustered_sql_path).rstrip('\r\n')),
-                    'refs': [['seed']],
-                    'relation_name': '`{0}`.`{1}`.multi_clustered'.format(
-                        self.default_database, my_schema_name
-                    ),
-                    'resource_type': 'model',
-                    'root_path': self.test_root_realpath,
-                    'schema': my_schema_name,
-                    'database': self.default_database,
-                    'tags': [],
-                    'meta': {},
-                    'unique_id': 'model.test.multi_clustered',
-                    'columns': {
-                        'email': {
-                            'description': "The user's email",
-                            'name': 'email',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'first_name': {
-                            'description': "The user's name",
-                            'name': 'first_name',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'id': {
-                            'description': 'The user id',
-                            'name': 'id',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'ip_address': {
-                            'description': "The user's IP address",
-                            'name': 'ip_address',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'updated_at': {
-                            'description': 'When the user was updated',
-                            'name': 'updated_at',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                    },
-                    'deferred': False,
-                    'description': 'A clustered and partitioned copy of the test model, clustered on multiple columns',
-                    'patch_path': self.dir('bq_models/schema.yml'),
-                    'docs': {'show': True},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'extra_ctes_injected': True,
-                    'extra_ctes': [],
-                    'checksum': self._checksum_file(multi_clustered_sql_path),
-                    'unrendered_config': self.unrendered_model_config(
-                        cluster_by=['first_name', 'email'],
-                        materialized='table',
-                        partition_by={'field': 'updated_at',
-                                      'data_type': 'date'}
-                    ),
-                },
-                'model.test.nested_view': {
-                    'alias': 'nested_view',
-                    'build_path': Normalized('target/compiled/test/bq_models/nested_view.sql'),
-                    'config': self.rendered_model_config(),
-                    'sources': [],
-                    'depends_on': {
-                        'macros': [],
-                        'nodes': ['model.test.nested_table']
-                    },
-                    'fqn': ['test', 'nested_view'],
-                    'name': 'nested_view',
-                    'original_file_path': nested_view_sql_path,
-                    'package_name': 'test',
-                    'path': 'nested_view.sql',
-                    'raw_sql': LineIndifferent(_read_file(nested_view_sql_path).rstrip('\r\n')),
-                    'refs': [['nested_table']],
-                    'relation_name': '`{0}`.`{1}`.nested_view'.format(
-                        self.default_database, my_schema_name
-                    ),
-                    'resource_type': 'model',
-                    'root_path': self.test_root_realpath,
-                    'schema': my_schema_name,
-                    'database': self.default_database,
-                    'tags': [],
-                    'meta': {},
-                    'unique_id': 'model.test.nested_view',
-                    'columns': {
-                        'field_1': {
-                            'name': 'field_1',
-                            'description': 'The first field',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'field_2': {
-                            'name': 'field_2',
-                            'description': 'The second field',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'field_3': {
-                            'name': 'field_3',
-                            'description': 'The third field',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'nested_field.field_4': {
-                            'name': 'nested_field.field_4',
-                            'description': 'The first nested field',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'nested_field.field_5': {
-                            'name': 'nested_field.field_5',
-                            'description': 'The second nested field',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                    },
-                    'deferred': False,
-                    'description': 'The test model',
-                    'patch_path': self.dir('bq_models/schema.yml'),
-                    'docs': {'show': True},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'extra_ctes_injected': True,
-                    'extra_ctes': [],
-                    'checksum': self._checksum_file(nested_view_sql_path),
-                    'unrendered_config': self.unrendered_model_config(materialized='view'),
-                },
-                'model.test.nested_table': {
-                    'alias': 'nested_table',
-                    'build_path': Normalized('target/compiled/test/bq_models/nested_table.sql'),
-                    'config': self.rendered_model_config(materialized='table'),
-                    'sources': [],
-                    'depends_on': {
-                        'macros': [],
-                        'nodes': []
-                    },
-                    'fqn': ['test', 'nested_table'],
-                    'name': 'nested_table',
-                    'original_file_path': nested_table_sql_path,
-                    'package_name': 'test',
-                    'patch_path': None,
-                    'path': 'nested_table.sql',
-                    'raw_sql': LineIndifferent(_read_file(nested_table_sql_path).rstrip('\r\n')),
-                    'refs': [],
-                    'relation_name': '`{0}`.`{1}`.nested_table'.format(
-                        self.default_database, my_schema_name
-                    ),
-                    'resource_type': 'model',
-                    'root_path': self.test_root_realpath,
-                    'schema': my_schema_name,
-                    'database': self.default_database,
-                    'tags': [],
-                    'meta': {},
-                    'unique_id': 'model.test.nested_table',
-                    'columns': {},
-                    'deferred': False,
-                    'description': '',
-                    'docs': {'show': True},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'extra_ctes_injected': True,
-                    'extra_ctes': [],
-                    'checksum': self._checksum_file(nested_table_sql_path),
-                    'unrendered_config': self.unrendered_model_config(materialized='table'),
-                },
-                'seed.test.seed': {
-                    'build_path': None,
-                    'patch_path': self.dir('seed/schema.yml'),
-                    'path': 'seed.csv',
-                    'name': 'seed',
-                    'root_path': self.test_root_realpath,
-                    'relation_name': '`{0}`.`{1}`.seed'.format(
-                        self.default_database, my_schema_name
-                    ),
-                    'resource_type': 'seed',
-                    'raw_sql': '',
-                    'package_name': 'test',
-                    'original_file_path': seed_path,
-                    'refs': [],
-                    'sources': [],
-                    'depends_on': {
-                        'nodes': [],
-                        'macros': [],
-                    },
-                    'unique_id': 'seed.test.seed',
-                    'fqn': ['test', 'seed'],
-                    'tags': [],
-                    'meta': {},
-                    'config': self.rendered_seed_config(),
-                    'schema': my_schema_name,
-                    'database': self.default_database,
-                    'alias': 'seed',
-                    'columns': {
-                        'id': {
-                            'name': 'id',
-                            'description': 'The user ID number',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'first_name': {
-                            'name': 'first_name',
-                            'description': "The user's first name",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'email': {
-                            'name': 'email',
-                            'description': "The user's email",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'ip_address': {
-                            'name': 'ip_address',
-                            'description': "The user's IP address",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'updated_at': {
-                            'name': 'updated_at',
-                            'description': "The last time this user's email was updated",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                    },
-                    'deferred': False,
-                    'description': 'The test seed',
-                    'docs': {'show': True},
-                    'compiled': True,
-                    'compiled_sql': '',
-                    'extra_ctes_injected': True,
-                    'extra_ctes': [],
-                    'checksum': self._checksum_file(seed_path),
-                    'unrendered_config': self.unrendered_seed_config(),
-                },
-                'snapshot.test.snapshot_seed': {
-                    'alias': 'snapshot_seed',
-                    'build_path': None,
-                    'checksum': self._checksum_file(snapshot_path),
-                    'columns': {},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'config': self.rendered_snapshot_config(
-                        target_schema=self.alternate_schema
-                    ),
-                    'database': self.default_database,
-                    'deferred': False,
-                    'depends_on': {'macros': [],
-                                   'nodes': ['seed.test.seed']},
-                    'description': '',
-                    'docs': {'show': True},
-                    'extra_ctes': [],
-                    'extra_ctes_injected': True,
-                    'fqn': ['test', 'snapshot_seed', 'snapshot_seed'],
-                    'meta': {},
-                    'name': 'snapshot_seed',
-                    'original_file_path': snapshot_path,
-                    'package_name': 'test',
-                    'patch_path': None,
-                    'path': 'snapshot_seed.sql',
-                    'raw_sql': ANY,
-                    'refs': [['seed']],
-                    'relation_name': '`{0}`.`{1}`.snapshot_seed'.format(
-                        self.default_database, self.alternate_schema
-                    ),
-                    'resource_type': 'snapshot',
-                    'root_path': self.test_root_realpath,
-                    'schema': self.alternate_schema,
-                    'sources': [],
-                    'tags': [],
-                    'unique_id': 'snapshot.test.snapshot_seed',
-                    'unrendered_config': self.unrendered_snapshot_config(
-                        target_schema=self.alternate_schema
-                    )}
-            },
-            'sources': {},
-            'exposures': {},
-            'selectors': {},
-            'child_map': {
-                'model.test.clustered': [],
-                'model.test.multi_clustered': [],
-                'model.test.nested_table': ['model.test.nested_view'],
-                'model.test.nested_view': [],
-                'seed.test.seed': ['model.test.clustered',
-                                   'model.test.multi_clustered',
-                                   'snapshot.test.snapshot_seed'],
-                'snapshot.test.snapshot_seed': []
-            },
-            'parent_map': {
-                'model.test.clustered': ['seed.test.seed'],
-                'model.test.multi_clustered': ['seed.test.seed'],
-                'seed.test.seed': [],
-                'snapshot.test.snapshot_seed': ['seed.test.seed'],
-                'model.test.nested_table': [],
-                'model.test.nested_view': ['model.test.nested_table'],
-            },
-            'docs': {
-                'dbt.__overview__': ANY,
-                'test.macro_info': ANY,
-                'test.macro_arg_info': ANY,
-            },
-            'disabled': [],
         }
 
     def _checksum_file(self, path):
@@ -2647,236 +1776,6 @@ class TestDocsGenerate(DBTIntegrationTest):
             self._quote("{1}") if quote_schema else '{1}',
             self._quote("{2}") if quote_identifier else '{2}',
         ))
-
-    def expected_redshift_incremental_view_manifest(self):
-        model_sql_path = self.dir('rs_models/model.sql')
-        my_schema_name = self.unique_schema()
-        seed_path = self.dir('seed/seed.csv')
-        snapshot_path = self.dir('snapshot/snapshot_seed.sql')
-
-        return {
-            'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v1.json',
-            'dbt_version': dbt.version.__version__,
-            'nodes': {
-                'model.test.model': {
-                    'build_path': Normalized('target/compiled/test/rs_models/model.sql'),
-                    'name': 'model',
-                    'root_path': self.test_root_realpath,
-                    'relation_name': '"{0}"."{1}".model'.format(
-                        self.default_database, my_schema_name
-                    ),
-                    'resource_type': 'model',
-                    'path': 'model.sql',
-                    'original_file_path': model_sql_path,
-                    'package_name': 'test',
-                    'raw_sql': LineIndifferent(_read_file(model_sql_path).rstrip('\r\n')),
-                    'refs': [['seed']],
-                    'sources': [],
-                    'depends_on': {
-                        'nodes': ['seed.test.seed'],
-                        'macros': [],
-                    },
-                    'unique_id': 'model.test.model',
-                    'fqn': ['test', 'model'],
-                    'tags': [],
-                    'meta': {},
-                    'config': self.rendered_model_config(bind=False),
-                    'schema': my_schema_name,
-                    'database': self.default_database,
-                    'alias': 'model',
-                    'deferred': False,
-                    'description': 'The test model',
-                    'columns': {
-                        'id': {
-                            'name': 'id',
-                            'description': 'The user ID number',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'first_name': {
-                            'name': 'first_name',
-                            'description': "The user's first name",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'email': {
-                            'name': 'email',
-                            'description': "The user's email",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'ip_address': {
-                            'name': 'ip_address',
-                            'description': "The user's IP address",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'updated_at': {
-                            'name': 'updated_at',
-                            'description': "The last time this user's email was updated",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                    },
-                    'patch_path': self.dir('rs_models/schema.yml'),
-                    'docs': {'show': True},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'extra_ctes_injected': True,
-                    'extra_ctes': [],
-                    'checksum': self._checksum_file(model_sql_path),
-                    'unrendered_config': self.unrendered_model_config(bind=False, materialized='view'),
-                },
-                'seed.test.seed': {
-                    'build_path': None,
-                    'patch_path': self.dir('seed/schema.yml'),
-                    'path': 'seed.csv',
-                    'name': 'seed',
-                    'root_path': self.test_root_realpath,
-                    'relation_name': '"{0}"."{1}".seed'.format(
-                        self.default_database, my_schema_name
-                    ),
-                    'resource_type': 'seed',
-                    'raw_sql': '',
-                    'package_name': 'test',
-                    'original_file_path': seed_path,
-                    'refs': [],
-                    'sources': [],
-                    'depends_on': {
-                        'nodes': [],
-                        'macros': [],
-                    },
-                    'unique_id': 'seed.test.seed',
-                    'fqn': ['test', 'seed'],
-                    'tags': [],
-                    'meta': {},
-                    'config': self.rendered_seed_config(),
-                    'schema': my_schema_name,
-                    'database': self.default_database,
-                    'alias': 'seed',
-                    'columns': {
-                        'id': {
-                            'name': 'id',
-                            'description': 'The user ID number',
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'first_name': {
-                            'name': 'first_name',
-                            'description': "The user's first name",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'email': {
-                            'name': 'email',
-                            'description': "The user's email",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'ip_address': {
-                            'name': 'ip_address',
-                            'description': "The user's IP address",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                        'updated_at': {
-                            'name': 'updated_at',
-                            'description': "The last time this user's email was updated",
-                            'data_type': None,
-                            'meta': {},
-                            'quote': None,
-                            'tags': [],
-                        },
-                    },
-                    'deferred': False,
-                    'description': 'The test seed',
-                    'docs': {'show': True},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'extra_ctes_injected': True,
-                    'extra_ctes': [],
-                    'checksum': self._checksum_file(seed_path),
-                    'unrendered_config': self.unrendered_seed_config(),
-                },
-                'snapshot.test.snapshot_seed': {
-                    'alias': 'snapshot_seed',
-                    'build_path': None,
-                    'checksum': self._checksum_file(snapshot_path),
-                    'columns': {},
-                    'compiled': True,
-                    'compiled_sql': ANY,
-                    'config': self.rendered_snapshot_config(
-                        target_schema=self.alternate_schema
-                    ),
-                    'database': self.default_database,
-                    'deferred': False,
-                    'depends_on': {'macros': [],
-                                   'nodes': ['seed.test.seed']},
-                    'description': '',
-                    'docs': {'show': True},
-                    'extra_ctes': [],
-                    'extra_ctes_injected': True,
-                    'fqn': ['test', 'snapshot_seed', 'snapshot_seed'],
-                    'meta': {},
-                    'name': 'snapshot_seed',
-                    'original_file_path': snapshot_path,
-                    'package_name': 'test',
-                    'patch_path': None,
-                    'path': 'snapshot_seed.sql',
-                    'raw_sql': ANY,
-                    'refs': [['seed']],
-                    'relation_name': '"{0}"."{1}".snapshot_seed'.format(
-                        self.default_database, self.alternate_schema
-                    ),
-                    'resource_type': 'snapshot',
-                    'root_path': self.test_root_realpath,
-                    'schema': self.alternate_schema,
-                    'sources': [],
-                    'tags': [],
-                    'unique_id': 'snapshot.test.snapshot_seed',
-                    'unrendered_config': self.unrendered_snapshot_config(
-                        target_schema=self.alternate_schema
-                    )}
-            },
-            'sources': {},
-            'exposures': {},
-            'selectors': {},
-            'parent_map': {
-                'model.test.model': ['seed.test.seed'],
-                'seed.test.seed': [],
-                'snapshot.test.snapshot_seed': ['seed.test.seed']
-            },
-            'child_map': {
-                'model.test.model': [],
-                'seed.test.seed': ['model.test.model',
-                                   'snapshot.test.snapshot_seed'],
-                'snapshot.test.snapshot_seed': []
-            },
-            'docs': {
-                'dbt.__overview__': ANY,
-                'test.macro_info': ANY,
-                'test.macro_arg_info': ANY,
-            },
-            'disabled': [],
-        }
 
     def verify_metadata(self, metadata, dbt_schema_version):
         assert 'generated_at' in metadata
@@ -2913,19 +1812,18 @@ class TestDocsGenerate(DBTIntegrationTest):
             elif key == 'metadata':
                 metadata = manifest['metadata']
                 self.verify_metadata(
-                    metadata, 'https://schemas.getdbt.com/dbt/manifest/v1.json')
+                    metadata, 'https://schemas.getdbt.com/dbt/manifest/v3.json')
                 assert 'project_id' in metadata and metadata[
                     'project_id'] == '098f6bcd4621d373cade4e832627b4f6'
                 assert 'send_anonymous_usage_stats' in metadata and metadata[
                     'send_anonymous_usage_stats'] is False
-                assert 'user_id' in metadata and metadata['user_id'] is None
                 assert 'adapter_type' in metadata and metadata['adapter_type'] == self.adapter_type
             else:
                 self.assertIn(key, expected_manifest)  # sanity check
                 self.assertEqual(manifest[key], expected_manifest[key])
-
+                
     def _quote(self, value):
-        quote_char = '`' if self.adapter_type == 'bigquery' else '"'
+        quote_char = '"'
         return '{0}{1}{0}'.format(quote_char, value)
 
     def expected_run_results(self):
@@ -2942,6 +1840,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
@@ -2951,6 +1850,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
@@ -2960,6 +1860,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
@@ -2969,33 +1870,37 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
                 'message': None,
                 'execution_time': AnyFloat(),
-                'unique_id': 'test.test.not_null_model_id',
+                'unique_id': 'test.test.not_null_model_id.d01cc630e6',
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
                 'message': None,
                 'execution_time': AnyFloat(),
-                'unique_id': 'test.test.test_nothing_model_',
+                'unique_id': 'test.test.test_nothing_model_.5d38568946',
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
                 'message': None,
                 'execution_time': AnyFloat(),
-                'unique_id': 'test.test.unique_model_id',
+                'unique_id': 'test.test.unique_model_id.67b76558ff',
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
         ]
 
@@ -3009,6 +1914,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
@@ -3018,6 +1924,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
@@ -3027,6 +1934,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
             {
                 'status': 'success',
@@ -3036,6 +1944,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'adapter_response': ANY,
                 'thread_id': ANY,
                 'timing': [ANY, ANY],
+                'failures': ANY,
             },
         ]
 
@@ -3043,7 +1952,7 @@ class TestDocsGenerate(DBTIntegrationTest):
         run_results = _read_json('./target/run_results.json')
         assert 'metadata' in run_results
         self.verify_metadata(
-            run_results['metadata'], 'https://schemas.getdbt.com/dbt/run-results/v1.json')
+            run_results['metadata'], 'https://schemas.getdbt.com/dbt/run-results/v3.json')
         self.assertIn('elapsed_time', run_results)
         self.assertGreater(run_results['elapsed_time'], 0)
         self.assertTrue(
@@ -3099,115 +2008,6 @@ class TestDocsGenerate(DBTIntegrationTest):
 
         assert not os.path.exists('./target/non-existent-assets')
 
-    @use_profile('snowflake')
-    def test__snowflake__run_and_generate(self):
-        self.run_and_generate()
-
-        self.verify_catalog(self.expected_snowflake_catalog())
-        self.verify_manifest(self.expected_seeded_manifest())
-        self.verify_run_results(self.expected_run_results())
-
-    @use_profile('snowflake')
-    def test__snowflake__run_and_generate_ignore_quoting_parameter(self):
-        # with optional adapters, this package could easily just not exist!
-        # accordingly, only run it when we think snowflake things should work
-        from dbt.adapters.snowflake import connections as snowflake_conn
-        old_connect = snowflake_conn.snowflake.connector.connect
-
-        def connect(*args, **kwargs):
-            kwargs['session_parameters'] = {
-                'QUOTED_IDENTIFIERS_IGNORE_CASE': True
-            }
-            return old_connect(*args, **kwargs)
-
-        with patch.object(snowflake_conn.snowflake.connector, 'connect', connect):
-            self.run_and_generate({
-                'quoting': {
-                    'identifier': True,
-                }
-            })
-
-        self.verify_catalog(self.expected_snowflake_catalog(case_columns=True))
-        self.verify_manifest(self.expected_seeded_manifest(quote_model=True))
-        self.verify_run_results(self.expected_run_results())
-
-    @use_profile('bigquery')
-    def test__bigquery__run_and_generate(self):
-        self.run_and_generate()
-
-        self.verify_catalog(self.expected_bigquery_catalog())
-        self.verify_manifest(self.expected_seeded_manifest())
-        self.verify_run_results(self.expected_run_results())
-
-    @use_profile('bigquery')
-    def test__bigquery__complex_models(self):
-        self.run_and_generate(
-            extra={'source-paths': [self.dir('bq_models')]},
-            model_count=4
-        )
-
-        self.verify_catalog(self.expected_bigquery_complex_catalog())
-        self.verify_manifest(self.expected_bigquery_complex_manifest())
-
-    @use_profile('redshift')
-    def test__redshift__run_and_generate(self):
-        self.run_and_generate(alternate_db=self.default_database)
-        self.verify_catalog(self.expected_redshift_catalog())
-        self.verify_manifest(self.expected_seeded_manifest(
-            model_database=self.default_database
-        ))
-        self.verify_run_results(self.expected_run_results())
-
-    @use_profile('redshift')
-    def test__redshift__incremental_view(self):
-        self.run_and_generate(
-            {'source-paths': [self.dir('rs_models')]},
-            alternate_db=self.default_database,
-            model_count=1,
-        )
-        self.verify_catalog(self.expected_redshift_incremental_catalog())
-        self.verify_manifest(
-            self.expected_redshift_incremental_view_manifest())
-
-    @use_profile('presto')
-    def test__presto__run_and_generate(self):
-        self.run_and_generate(alternate_db=self.default_database)
-        self.verify_catalog(self.expected_presto_catalog())
-        self.verify_manifest(self.expected_seeded_manifest(
-            model_database=self.default_database
-        ))
-        self.verify_run_results(self.expected_run_results())
-
-
-class TestDocsGenerateMissingSchema(DBTIntegrationTest):
-    @property
-    def schema(self):
-        return 'docs_generate_029'
-
-    @staticmethod
-    def dir(path):
-        return normalize(path)
-
-    @property
-    def models(self):
-        return self.dir("bq_models_noschema")
-
-    def setUp(self):
-        super().setUp()
-        self.extra_schema = self.unique_schema() + '_bq_test'
-
-    def tearDown(self):
-        with self.adapter.connection_named('__test'):
-            self._drop_schema_named(self.default_database, self.extra_schema)
-        super().tearDown()
-
-    @use_profile('bigquery')
-    def test_bigquery_docs_generate_noschema(self):
-        self.run_dbt([
-            'docs', 'generate',
-            '--vars', "{{extra_schema: {}}}".format(self.extra_schema)
-        ])
-
 
 class TestDocsGenerateOverride(DBTIntegrationTest):
 
@@ -3235,7 +2035,7 @@ class TestDocsGenerateOverride(DBTIntegrationTest):
         self.assertEqual(len(self.run_dbt(['run'])), 1)
         # this should pick up our failure macro and raise a compilation exception
         with self.assertRaises(CompilationException) as exc:
-            self.run_dbt(['docs', 'generate'])
+            self.run_dbt(['--warn-error', 'docs', 'generate'])
 
         self.assertIn('rejected: no catalogs for you', str(exc.exception))
 

@@ -2,14 +2,13 @@ from dataclasses import field, Field, dataclass
 from enum import Enum
 from itertools import chain
 from typing import (
-    Any, List, Optional, Dict, MutableMapping, Union, Type,
-    TypeVar, Callable,
+    Any, List, Optional, Dict, Union, Type, TypeVar, Callable
 )
 from dbt.dataclass_schema import (
     dbtClassMixin, ValidationError, register_pattern,
 )
 from dbt.contracts.graph.unparsed import AdditionalPropertiesAllowed
-from dbt.exceptions import CompilationException, InternalException
+from dbt.exceptions import InternalException, CompilationException
 from dbt.contracts.util import Replaceable, list_str
 from dbt import hooks
 from dbt.node_types import NodeType
@@ -182,19 +181,23 @@ T = TypeVar('T', bound='BaseConfig')
 
 @dataclass
 class BaseConfig(
-    AdditionalPropertiesAllowed, Replaceable, MutableMapping[str, Any]
+    AdditionalPropertiesAllowed, Replaceable
 ):
-    # Implement MutableMapping so this config will behave as some macros expect
-    # during parsing (notably, syntax like `{{ node.config['schema'] }}`)
+
+    # enable syntax like: config['key']
     def __getitem__(self, key):
-        """Handle parse-time use of `config` as a dictionary, making the extra
-        values available during parsing.
-        """
+        return self.get(key)
+
+    # like doing 'get' on a dictionary
+    def get(self, key, default=None):
         if hasattr(self, key):
             return getattr(self, key)
-        else:
+        elif key in self._extra:
             return self._extra[key]
+        else:
+            return default
 
+    # enable syntax like: config['key'] = value
     def __setitem__(self, key, value):
         if hasattr(self, key):
             setattr(self, key, value)
@@ -264,8 +267,15 @@ class BaseConfig(
                     return False
         return True
 
+    # This is used in 'add_config_call' to created the combined config_call_dict.
+    # 'meta' moved here from node
+    mergebehavior = {
+        "append": ['pre-hook', 'pre_hook', 'post-hook', 'post_hook', 'tags'],
+        "update": ['quoting', 'column_types', 'meta'],
+    }
+
     @classmethod
-    def _extract_dict(
+    def _merge_dicts(
         cls, src: Dict[str, Any], data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Find all the items in data that match a target_field on this class,
@@ -307,14 +317,14 @@ class BaseConfig(
         """
         # sadly, this is a circular import
         from dbt.adapters.factory import get_config_class_by_name
-        dct = self.to_dict(options={'keep_none': True})
+        dct = self.to_dict(omit_none=False)
 
         adapter_config_cls = get_config_class_by_name(adapter_type)
 
-        self_merged = self._extract_dict(dct, data)
+        self_merged = self._merge_dicts(dct, data)
         dct.update(self_merged)
 
-        adapter_merged = adapter_config_cls._extract_dict(dct, data)
+        adapter_merged = adapter_config_cls._merge_dicts(dct, data)
         dct.update(adapter_merged)
 
         # any remaining fields must be "clobber"
@@ -326,12 +336,12 @@ class BaseConfig(
         return self.from_dict(dct)
 
     def finalize_and_validate(self: T) -> T:
-        dct = self.to_dict(options={'keep_none': True})
+        dct = self.to_dict(omit_none=False)
         self.validate(dct)
         return self.from_dict(dct)
 
     def replace(self, **kwargs):
-        dct = self.to_dict()
+        dct = self.to_dict(omit_none=True)
 
         mapping = self.field_mapping()
         for key, value in kwargs.items():
@@ -346,33 +356,8 @@ class SourceConfig(BaseConfig):
 
 
 @dataclass
-class NodeConfig(BaseConfig):
+class NodeAndTestConfig(BaseConfig):
     enabled: bool = True
-    materialized: str = 'view'
-    persist_docs: Dict[str, Any] = field(default_factory=dict)
-    post_hook: List[Hook] = field(
-        default_factory=list,
-        metadata=MergeBehavior.Append.meta(),
-    )
-    pre_hook: List[Hook] = field(
-        default_factory=list,
-        metadata=MergeBehavior.Append.meta(),
-    )
-    # this only applies for config v1, so it doesn't participate in comparison
-    vars: Dict[str, Any] = field(
-        default_factory=dict,
-        metadata=metas(CompareBehavior.Exclude, MergeBehavior.Update),
-    )
-    quoting: Dict[str, Any] = field(
-        default_factory=dict,
-        metadata=MergeBehavior.Update.meta(),
-    )
-    # This is actually only used by seeds. Should it be available to others?
-    # That would be a breaking change!
-    column_types: Dict[str, Any] = field(
-        default_factory=dict,
-        metadata=MergeBehavior.Update.meta(),
-    )
     # these fields are included in serialized output, but are not part of
     # config comparison (they are part of database_representation)
     alias: Optional[str] = field(
@@ -393,11 +378,42 @@ class NodeConfig(BaseConfig):
                        MergeBehavior.Append,
                        CompareBehavior.Exclude),
     )
+    meta: Dict[str, Any] = field(
+        default_factory=dict,
+        metadata=MergeBehavior.Update.meta(),
+    )
+
+
+@dataclass
+class NodeConfig(NodeAndTestConfig):
+    # Note: if any new fields are added with MergeBehavior, also update the
+    # 'mergebehavior' dictionary
+    materialized: str = 'view'
+    persist_docs: Dict[str, Any] = field(default_factory=dict)
+    post_hook: List[Hook] = field(
+        default_factory=list,
+        metadata=MergeBehavior.Append.meta(),
+    )
+    pre_hook: List[Hook] = field(
+        default_factory=list,
+        metadata=MergeBehavior.Append.meta(),
+    )
+    quoting: Dict[str, Any] = field(
+        default_factory=dict,
+        metadata=MergeBehavior.Update.meta(),
+    )
+    # This is actually only used by seeds. Should it be available to others?
+    # That would be a breaking change!
+    column_types: Dict[str, Any] = field(
+        default_factory=dict,
+        metadata=MergeBehavior.Update.meta(),
+    )
     full_refresh: Optional[bool] = None
+    on_schema_change: Optional[str] = 'ignore'
 
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
-        data = super().__pre_deserialize__(data, options=options)
+    def __pre_deserialize__(cls, data):
+        data = super().__pre_deserialize__(data)
         field_map = {'post-hook': 'post_hook', 'pre-hook': 'pre_hook'}
         # create a new dict because otherwise it gets overwritten in
         # tests
@@ -414,8 +430,8 @@ class NodeConfig(BaseConfig):
                 data[new_name] = data.pop(field_name)
         return data
 
-    def __post_serialize__(self, dct, options=None):
-        dct = super().__post_serialize__(dct, options=options)
+    def __post_serialize__(self, dct):
+        dct = super().__post_serialize__(dct)
         field_map = {'post_hook': 'post-hook', 'pre_hook': 'pre-hook'}
         for field_name in field_map:
             if field_name in dct:
@@ -435,9 +451,44 @@ class SeedConfig(NodeConfig):
 
 
 @dataclass
-class TestConfig(NodeConfig):
+class TestConfig(NodeAndTestConfig):
+    # this is repeated because of a different default
+    schema: Optional[str] = field(
+        default='dbt_test__audit',
+        metadata=CompareBehavior.Exclude.meta(),
+    )
     materialized: str = 'test'
     severity: Severity = Severity('ERROR')
+    store_failures: Optional[bool] = None
+    where: Optional[str] = None
+    limit: Optional[int] = None
+    fail_calc: str = 'count(*)'
+    warn_if: str = '!= 0'
+    error_if: str = '!= 0'
+
+    @classmethod
+    def same_contents(
+        cls, unrendered: Dict[str, Any], other: Dict[str, Any]
+    ) -> bool:
+        """This is like __eq__, except it explicitly checks certain fields."""
+        modifiers = [
+            'severity',
+            'where',
+            'limit',
+            'fail_calc',
+            'warn_if',
+            'error_if',
+            'store_failures'
+        ]
+
+        seen = set()
+        for _, target_name in cls._get_fields():
+            key = target_name
+            seen.add(key)
+            if key in modifiers:
+                if not cls.compare_key(unrendered, other, key):
+                    return False
+        return True
 
 
 @dataclass
@@ -457,6 +508,11 @@ class SnapshotConfig(EmptySnapshotConfig):
     @classmethod
     def validate(cls, data):
         super().validate(data)
+        if not data.get('strategy') or not data.get('unique_key') or not \
+                data.get('target_schema'):
+            raise ValidationError(
+                "Snapshots must be configured with a 'strategy', 'unique_key', "
+                "and 'target_schema'.")
         if data.get('strategy') == 'check':
             if not data.get('check_cols'):
                 raise ValidationError(
@@ -480,7 +536,7 @@ class SnapshotConfig(EmptySnapshotConfig):
         # formerly supported with GenericSnapshotConfig
 
     def finalize_and_validate(self):
-        data = self.to_dict()
+        data = self.to_dict(omit_none=True)
         self.validate(data)
         return self.from_dict(data)
 

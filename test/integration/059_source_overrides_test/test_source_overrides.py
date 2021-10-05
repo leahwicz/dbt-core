@@ -59,8 +59,7 @@ class TestSourceOverrides(DBTIntegrationTest):
             'blue',{id},'Jake','abc@example.com','192.168.1.1','{time}'
         )"""
         quoted_columns = ','.join(
-            self.adapter.quote(c) if self.adapter_type != 'bigquery' else c
-            for c in
+            self.adapter.quote(c) for c in
             ('favorite_color', 'id', 'first_name', 'email', 'ip_address', 'updated_at')
         )
         self.run_sql(
@@ -76,11 +75,6 @@ class TestSourceOverrides(DBTIntegrationTest):
 
     @use_profile('postgres')
     def test_postgres_source_overrides(self):
-        # without running 'deps', our source overrides are invalid
-        _, stdout = self.run_dbt_and_capture(['compile'], strict=False)
-        self.assertRegex(stdout, r'WARNING(\x1b\[0m\])?: During parsing, dbt encountered source overrides that had no target')
-        schema_path = os.path.join('models', 'schema.yml')
-        self.assertIn(f'Source localdep.my_source (in {schema_path})', stdout)
         self.run_dbt(['deps'])
         seed_results = self.run_dbt(['seed'])
         assert len(seed_results) == 5

@@ -36,7 +36,7 @@
     Create SCD Hash SQL fields cross-db
 #}
 {% macro snapshot_hash_arguments(args) -%}
-  {{ adapter.dispatch('snapshot_hash_arguments')(args) }}
+  {{ adapter.dispatch('snapshot_hash_arguments', 'dbt')(args) }}
 {%- endmacro %}
 
 
@@ -52,7 +52,7 @@
     Get the current time cross-db
 #}
 {% macro snapshot_get_time() -%}
-  {{ adapter.dispatch('snapshot_get_time')() }}
+  {{ adapter.dispatch('snapshot_get_time', 'dbt')() }}
 {%- endmacro %}
 
 {% macro default__snapshot_get_time() -%}
@@ -75,7 +75,7 @@
         table instead of assuming that the user-supplied {{ updated_at }}
         will be present in the historical data.
 
-        See https://github.com/fishtown-analytics/dbt/issues/2350
+        See https://github.com/dbt-labs/dbt/issues/2350
     */ #}
     {% set row_changed_expr -%}
         ({{ snapshotted_rel }}.dbt_valid_from < {{ current_rel }}.{{ updated_at }})
@@ -94,7 +94,7 @@
 
 
 {% macro snapshot_string_as_time(timestamp) -%}
-    {{ adapter.dispatch('snapshot_string_as_time')(timestamp) }}
+    {{ adapter.dispatch('snapshot_string_as_time', 'dbt')(timestamp) }}
 {%- endmacro %}
 
 
@@ -144,7 +144,7 @@
     {% if now is none or now is undefined -%}
         {%- do exceptions.raise_compiler_error('Could not get a snapshot start time from the database') -%}
     {%- endif %}
-    {% set updated_at = snapshot_string_as_time(now) %}
+    {% set updated_at = config.get('updated_at', snapshot_string_as_time(now)) %}
 
     {% set column_added = false %}
 

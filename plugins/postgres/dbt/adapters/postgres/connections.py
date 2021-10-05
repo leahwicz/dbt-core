@@ -19,10 +19,15 @@ class PostgresCredentials(Credentials):
     user: str
     port: Port
     password: str  # on postgres the password is mandatory
+    connect_timeout: int = 10
     role: Optional[str] = None
     search_path: Optional[str] = None
     keepalives_idle: int = 0  # 0 means to use the default value
     sslmode: Optional[str] = None
+    sslcert: Optional[str] = None
+    sslkey: Optional[str] = None
+    sslrootcert: Optional[str] = None
+    application_name: Optional[str] = 'dbt'
 
     _ALIASES = {
         'dbname': 'database',
@@ -32,6 +37,10 @@ class PostgresCredentials(Credentials):
     @property
     def type(self):
         return 'postgres'
+
+    @property
+    def unique_field(self):
+        return self.host
 
     def _connection_keys(self):
         return ('host', 'port', 'user', 'database', 'schema', 'search_path',
@@ -93,6 +102,18 @@ class PostgresConnectionManager(SQLConnectionManager):
         if credentials.sslmode:
             kwargs['sslmode'] = credentials.sslmode
 
+        if credentials.sslcert is not None:
+            kwargs["sslcert"] = credentials.sslcert
+
+        if credentials.sslkey is not None:
+            kwargs["sslkey"] = credentials.sslkey
+
+        if credentials.sslrootcert is not None:
+            kwargs["sslrootcert"] = credentials.sslrootcert
+
+        if credentials.application_name:
+            kwargs['application_name'] = credentials.application_name
+
         try:
             handle = psycopg2.connect(
                 dbname=credentials.database,
@@ -100,7 +121,7 @@ class PostgresConnectionManager(SQLConnectionManager):
                 host=credentials.host,
                 password=credentials.password,
                 port=credentials.port,
-                connect_timeout=10,
+                connect_timeout=credentials.connect_timeout,
                 **kwargs)
 
             if credentials.role:

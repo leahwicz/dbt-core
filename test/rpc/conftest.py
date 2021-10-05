@@ -1,4 +1,5 @@
 import os
+import sys
 import pytest
 import random
 import time
@@ -6,12 +7,18 @@ from typing import Dict, Any, Set
 
 import yaml
 
+from dbt import flags
 
 def pytest_addoption(parser):
     parser.addoption(
         '--profile', default='postgres', help='Use the postgres profile',
     )
 
+def pytest_runtest_setup(item):
+    # this is a hack in place to work around marking tests at the module level
+    # https://github.com/pytest-dev/pytest/issues/5830
+    if os.name == 'nt':
+        pytest.skip('"dbt rpc" not supported on windows')
 
 def _get_item_profiles(item) -> Set[str]:
     supported = set()
@@ -57,8 +64,8 @@ def profiles_root(tmpdir):
 def project_root(tmpdir):
     return tmpdir.mkdir('project')
 
-
 def postgres_profile_data(unique_schema):
+
     return {
         'config': {
             'send_anonymous_usage_stats': False
@@ -68,21 +75,21 @@ def postgres_profile_data(unique_schema):
                 'default': {
                     'type': 'postgres',
                     'threads': 4,
-                    'host': 'database',
-                    'port': 5432,
-                    'user': 'root',
-                    'pass': 'password',
-                    'dbname': 'dbt',
+                    'host': os.environ.get('POSTGRES_TEST_HOST', 'localhost'),
+                    'port': int(os.environ.get('POSTGRES_TEST_PORT', 5432)),
+                    'user': os.environ.get('POSTGRES_TEST_USER', 'root'),
+                    'pass': os.environ.get('POSTGRES_TEST_PASS', 'password'),
+                    'dbname': os.environ.get('POSTGRES_TEST_DATABASE', 'dbt'),
                     'schema': unique_schema,
                 },
                 'other_schema': {
                     'type': 'postgres',
                     'threads': 4,
-                    'host': 'database',
-                    'port': 5432,
-                    'user': 'root',
-                    'pass': 'password',
-                    'dbname': 'dbt',
+                    'host': os.environ.get('POSTGRES_TEST_HOST', 'localhost'),
+                    'port': int(os.environ.get('POSTGRES_TEST_PORT', 5432)),
+                    'user': os.environ.get('POSTGRES_TEST_USER', 'root'),
+                    'pass': os.environ.get('POSTGRES_TEST_PASS', 'password'),
+                    'dbname': os.environ.get('POSTGRES_TEST_DATABASE', 'dbt'),
                     'schema': unique_schema+'_alt',
                 }
             },
@@ -139,6 +146,7 @@ def dbt_profile_data(unique_schema, pytestconfig):
 
 @pytest.fixture
 def dbt_profile(profiles_root, dbt_profile_data) -> Dict[str, Any]:
+    flags.PROFILES_DIR = profiles_root
     path = os.path.join(profiles_root, 'profiles.yml')
     with open(path, 'w') as fp:
         fp.write(yaml.safe_dump(dbt_profile_data))

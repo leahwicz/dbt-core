@@ -9,10 +9,11 @@ from dbt.task.debug import DebugTask
 from dbt.adapters.base.query_headers import MacroQueryStringSetter
 from dbt.adapters.postgres import PostgresAdapter
 from dbt.adapters.postgres import Plugin as PostgresPlugin
+from dbt.contracts.files import FileHash
+from dbt.contracts.graph.manifest import ManifestStateCheck
 from dbt.clients import agate_helper
 from dbt.exceptions import ValidationException, DbtConfigError
 from dbt.logger import GLOBAL_LOGGER as logger  # noqa
-from dbt.parser.results import ParseResult
 from psycopg2 import extensions as psycopg2_extensions
 from psycopg2 import DatabaseError
 
@@ -22,7 +23,6 @@ from .utils import config_from_parts_or_dicts, inject_adapter, mock_connection, 
 class TestPostgresAdapter(unittest.TestCase):
 
     def setUp(self):
-        flags.STRICT_MODE = True
         project_cfg = {
             'name': 'X',
             'version': '0.1',
@@ -39,7 +39,7 @@ class TestPostgresAdapter(unittest.TestCase):
                     'host': 'thishostshouldnotexist',
                     'pass': 'password',
                     'port': 5432,
-                    'schema': 'public'
+                    'schema': 'public',
                 }
             },
             'target': 'test'
@@ -108,6 +108,37 @@ class TestPostgresAdapter(unittest.TestCase):
         master.handle.get_backend_pid.assert_not_called()
 
     @mock.patch('dbt.adapters.postgres.connections.psycopg2')
+    def test_default_connect_timeout(self, psycopg2):
+        connection = self.adapter.acquire_connection('dummy')
+
+        psycopg2.connect.assert_not_called()
+        connection.handle
+        psycopg2.connect.assert_called_once_with(
+            dbname='postgres',
+            user='root',
+            host='thishostshouldnotexist',
+            password='password',
+            port=5432,
+            connect_timeout=10,
+            application_name='dbt')
+
+    @mock.patch('dbt.adapters.postgres.connections.psycopg2')
+    def test_changed_connect_timeout(self, psycopg2):
+        self.config.credentials = self.config.credentials.replace(connect_timeout=30)
+        connection = self.adapter.acquire_connection('dummy')
+
+        psycopg2.connect.assert_not_called()
+        connection.handle
+        psycopg2.connect.assert_called_once_with(
+            dbname='postgres',
+            user='root',
+            host='thishostshouldnotexist',
+            password='password',
+            port=5432,
+            connect_timeout=30,
+            application_name='dbt')
+
+    @mock.patch('dbt.adapters.postgres.connections.psycopg2')
     def test_default_keepalive(self, psycopg2):
         connection = self.adapter.acquire_connection('dummy')
 
@@ -119,7 +150,8 @@ class TestPostgresAdapter(unittest.TestCase):
             host='thishostshouldnotexist',
             password='password',
             port=5432,
-            connect_timeout=10)
+            connect_timeout=10,
+            application_name='dbt')
 
     @mock.patch('dbt.adapters.postgres.connections.psycopg2')
     def test_changed_keepalive(self, psycopg2):
@@ -135,8 +167,39 @@ class TestPostgresAdapter(unittest.TestCase):
             password='password',
             port=5432,
             connect_timeout=10,
-            keepalives_idle=256)
+            keepalives_idle=256,
+            application_name='dbt')
 
+    @mock.patch('dbt.adapters.postgres.connections.psycopg2')
+    def test_default_application_name(self, psycopg2):
+        connection = self.adapter.acquire_connection('dummy')
+
+        psycopg2.connect.assert_not_called()
+        connection.handle
+        psycopg2.connect.assert_called_once_with(
+            dbname='postgres',
+            user='root',
+            host='thishostshouldnotexist',
+            password='password',
+            port=5432,
+            connect_timeout=10,
+            application_name='dbt')
+
+    @mock.patch('dbt.adapters.postgres.connections.psycopg2')
+    def test_changed_application_name(self, psycopg2):
+        self.config.credentials = self.config.credentials.replace(application_name='myapp')
+        connection = self.adapter.acquire_connection('dummy')
+
+        psycopg2.connect.assert_not_called()
+        connection.handle
+        psycopg2.connect.assert_called_once_with(
+            dbname='postgres',
+            user='root',
+            host='thishostshouldnotexist',
+            password='password',
+            port=5432,
+            connect_timeout=10,
+            application_name='myapp')
 
     @mock.patch('dbt.adapters.postgres.connections.psycopg2')
     def test_role(self, psycopg2):
@@ -161,6 +224,7 @@ class TestPostgresAdapter(unittest.TestCase):
             password='password',
             port=5432,
             connect_timeout=10,
+            application_name='dbt',
             options="-c search_path=test")
 
     @mock.patch('dbt.adapters.postgres.connections.psycopg2')
@@ -177,7 +241,31 @@ class TestPostgresAdapter(unittest.TestCase):
             password='password',
             port=5432,
             connect_timeout=10,
-            sslmode="require")
+            sslmode="require",
+            application_name='dbt')
+
+    @mock.patch('dbt.adapters.postgres.connections.psycopg2')
+    def test_ssl_parameters(self, psycopg2):
+        self.config.credentials = self.config.credentials.replace(sslmode="verify-ca")
+        self.config.credentials = self.config.credentials.replace(sslcert="service.crt")
+        self.config.credentials = self.config.credentials.replace(sslkey="service.key")
+        self.config.credentials = self.config.credentials.replace(sslrootcert="ca.crt")
+        connection = self.adapter.acquire_connection('dummy')
+
+        psycopg2.connect.assert_not_called()
+        connection.handle
+        psycopg2.connect.assert_called_once_with(
+            dbname='postgres',
+            user='root',
+            host='thishostshouldnotexist',
+            password='password',
+            port=5432,
+            connect_timeout=10,
+            sslmode="verify-ca",
+            sslcert="service.crt",
+            sslkey="service.key",
+            sslrootcert="ca.crt",
+            application_name='dbt')
 
     @mock.patch('dbt.adapters.postgres.connections.psycopg2')
     def test_schema_with_space(self, psycopg2):
@@ -193,6 +281,7 @@ class TestPostgresAdapter(unittest.TestCase):
             password='password',
             port=5432,
             connect_timeout=10,
+            application_name='dbt',
             options="-c search_path=test\ test")
 
     @mock.patch('dbt.adapters.postgres.connections.psycopg2')
@@ -208,7 +297,8 @@ class TestPostgresAdapter(unittest.TestCase):
             host='thishostshouldnotexist',
             password='password',
             port=5432,
-            connect_timeout=10)
+            connect_timeout=10,
+            application_name='dbt')
 
     @mock.patch.object(PostgresAdapter, 'execute_macro')
     @mock.patch.object(PostgresAdapter, '_get_catalog_schemas')
@@ -240,8 +330,6 @@ class TestPostgresAdapter(unittest.TestCase):
 
 class TestConnectingPostgresAdapter(unittest.TestCase):
     def setUp(self):
-        flags.STRICT_MODE = False
-
         self.target_dict = {
             'type': 'postgres',
             'dbname': 'postgres',
@@ -278,9 +366,19 @@ class TestConnectingPostgresAdapter(unittest.TestCase):
         self.patcher = mock.patch('dbt.adapters.postgres.connections.psycopg2')
         self.psycopg2 = self.patcher.start()
 
-        self.load_patch = mock.patch('dbt.parser.manifest.make_parse_result')
-        self.mock_parse_result = self.load_patch.start()
-        self.mock_parse_result.return_value = ParseResult.rpc()
+        # Create the Manifest.state_check patcher
+        @mock.patch('dbt.parser.manifest.ManifestLoader.build_manifest_state_check')
+        def _mock_state_check(self):
+            config = self.root_project
+            all_projects = self.all_projects
+            return ManifestStateCheck(
+                vars_hash=FileHash.from_contents('vars'),
+                project_hashes={name: FileHash.from_contents(name) for name in all_projects},
+                profile_hash=FileHash.from_contents('profile'),
+            )
+        self.load_state_check = mock.patch('dbt.parser.manifest.ManifestLoader.build_manifest_state_check')
+        self.mock_state_check = self.load_state_check.start()
+        self.mock_state_check.side_effect = _mock_state_check
 
         self.psycopg2.connect.return_value = self.handle
         self.adapter = PostgresAdapter(self.config)
@@ -298,7 +396,7 @@ class TestConnectingPostgresAdapter(unittest.TestCase):
         self.adapter.cleanup_connections()
         self.qh_patch.stop()
         self.patcher.stop()
-        self.load_patch.stop()
+        self.load_state_check.stop()
         clear_plugin(PostgresPlugin)
 
     def test_quoting_on_drop_schema(self):

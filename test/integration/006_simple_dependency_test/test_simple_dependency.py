@@ -1,7 +1,7 @@
 import os
 import tempfile
 from test.integration.base import DBTIntegrationTest, use_profile
-from dbt.exceptions import CompilationException
+from dbt.exceptions import CompilationException, DependencyException
 from dbt import deprecations
 
 
@@ -24,7 +24,7 @@ class TestSimpleDependency(DBTIntegrationTest):
         return {
             "packages": [
                 {
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project',
+                    'git': 'https://github.com/dbt-labs/dbt-integration-project',
                     'revision': '1.0',
                 }
             ]
@@ -102,7 +102,7 @@ class TestSimpleDependencyUnpinned(DBTIntegrationTest):
         return {
             "packages": [
                 {
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project',
+                    'git': 'https://github.com/dbt-labs/dbt-integration-project',
                     'warn-unpinned': True,
                 }
             ]
@@ -110,10 +110,7 @@ class TestSimpleDependencyUnpinned(DBTIntegrationTest):
 
     @use_profile('postgres')
     def test_postgres_simple_dependency(self):
-        with self.assertRaises(CompilationException) as exc:
-            self.run_dbt(["deps"])
-        assert 'is not pinned' in str(exc.exception)
-        self.run_dbt(['deps'], strict=False)
+        self.run_dbt(["deps"])
 
 
 class TestSimpleDependencyWithDuplicates(DBTIntegrationTest):
@@ -131,11 +128,11 @@ class TestSimpleDependencyWithDuplicates(DBTIntegrationTest):
         return {
             "packages": [
                 {
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project',
+                    'git': 'https://github.com/dbt-labs/dbt-integration-project',
                     'revision': 'dbt/0.17.0',
                 },
                 {
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project.git',
+                    'git': 'https://github.com/dbt-labs/dbt-integration-project.git',
                     'revision': 'dbt/0.17.0',
                 }
             ]
@@ -163,11 +160,11 @@ class TestRekeyedDependencyWithSubduplicates(DBTIntegrationTest):
             'packages': [
                 {
 
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project',
+                    'git': 'https://github.com/dbt-labs/dbt-integration-project',
                     'revision': 'config-version-2-deps'
                 },
                 {
-                    'git': 'https://github.com/fishtown-analytics/dbt-utils.git',
+                    'git': 'https://github.com/dbt-labs/dbt-utils',
                     'revision': '0.5.0',
                 }
             ]
@@ -198,7 +195,7 @@ class TestSimpleDependencyBranch(DBTIntegrationTest):
         return {
             "packages": [
                 {
-                    'git': 'https://github.com/fishtown-analytics/dbt-integration-project',
+                    'git': 'https://github.com/dbt-labs/dbt-integration-project',
                     'revision': 'dbt/0.17.0',
                 },
             ]

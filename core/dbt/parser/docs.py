@@ -1,13 +1,14 @@
-from typing import Iterable
+from typing import Iterable, Optional
 
 import re
 
 from dbt.clients.jinja import get_rendered
+from dbt.contracts.files import SourceFile
 from dbt.contracts.graph.parsed import ParsedDocumentation
 from dbt.node_types import NodeType
 from dbt.parser.base import Parser
 from dbt.parser.search import (
-    BlockContents, FileBlock, FilesystemSearcher, BlockSearcher
+    BlockContents, FileBlock, BlockSearcher
 )
 
 
@@ -15,13 +16,6 @@ SHOULD_PARSE_RE = re.compile(r'{[{%]')
 
 
 class DocumentationParser(Parser[ParsedDocumentation]):
-    def get_paths(self):
-        return FilesystemSearcher(
-            project=self.project,
-            relative_dirs=self.project.docs_paths,
-            extension='.md',
-        )
-
     @property
     def resource_type(self) -> NodeType:
         return NodeType.Documentation
@@ -30,7 +24,7 @@ class DocumentationParser(Parser[ParsedDocumentation]):
     def get_compiled_path(cls, block: FileBlock):
         return block.path.relative_path
 
-    def generate_unique_id(self, resource_name: str) -> str:
+    def generate_unique_id(self, resource_name: str, _: Optional[str] = None) -> str:
         # because docs are in their own graph namespace, node type doesn't
         # need to be part of the unique ID.
         return '{}.{}'.format(self.project.project_name, resource_name)
@@ -53,6 +47,7 @@ class DocumentationParser(Parser[ParsedDocumentation]):
         return [doc]
 
     def parse_file(self, file_block: FileBlock):
+        assert isinstance(file_block.file, SourceFile)
         searcher: Iterable[BlockContents] = BlockSearcher(
             source=[file_block],
             allowed_blocks={'docs'},
@@ -60,6 +55,4 @@ class DocumentationParser(Parser[ParsedDocumentation]):
         )
         for block in searcher:
             for parsed in self.parse_block(block):
-                self.results.add_doc(file_block.file, parsed)
-        # mark the file as seen, even if there are no macros in it
-        self.results.get_file(file_block.file)
+                self.manifest.add_doc(file_block.file, parsed)

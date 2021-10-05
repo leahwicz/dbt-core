@@ -145,9 +145,9 @@ class DbtProjectYamlRenderer(BaseRenderer):
         if first == 'vars':
             return False
 
-        if first in {'seeds', 'models', 'snapshots', 'seeds'}:
+        if first in {'seeds', 'models', 'snapshots', 'tests'}:
             keypath_parts = {
-                (k.lstrip('+') if isinstance(k, str) else k)
+                (k.lstrip('+ ') if isinstance(k, str) else k)
                 for k in keypath
             }
             # model-level hooks

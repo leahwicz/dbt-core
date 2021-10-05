@@ -66,6 +66,8 @@ class SelectionCriteria:
     parents_depth: Optional[int]
     children: bool
     children_depth: Optional[int]
+    greedy: bool = False
+    greedy_warning: bool = False  # do not raise warning for yaml selectors
 
     def __post_init__(self):
         if self.children and self.childrens_parents:
@@ -103,7 +105,7 @@ class SelectionCriteria:
 
     @classmethod
     def selection_criteria_from_dict(
-        cls, raw: Any, dct: Dict[str, Any]
+        cls, raw: Any, dct: Dict[str, Any], greedy: bool = False
     ) -> 'SelectionCriteria':
         if 'value' not in dct:
             raise RuntimeException(
@@ -123,6 +125,7 @@ class SelectionCriteria:
             parents_depth=parents_depth,
             children=bool(dct.get('children')),
             children_depth=children_depth,
+            greedy=(greedy or bool(dct.get('greedy'))),
         )
 
     @classmethod
@@ -143,16 +146,18 @@ class SelectionCriteria:
             dct['parents'] = bool(dct.get('parents'))
         if 'children' in dct:
             dct['children'] = bool(dct.get('children'))
+        if 'greedy' in dct:
+            dct['greedy'] = bool(dct.get('greedy'))
         return dct
 
     @classmethod
-    def from_single_spec(cls, raw: str) -> 'SelectionCriteria':
+    def from_single_spec(cls, raw: str, greedy: bool = False) -> 'SelectionCriteria':
         result = RAW_SELECTOR_PATTERN.match(raw)
         if result is None:
             # bad spec!
             raise RuntimeException(f'Invalid selector spec "{raw}"')
 
-        return cls.selection_criteria_from_dict(raw, result.groupdict())
+        return cls.selection_criteria_from_dict(raw, result.groupdict(), greedy=greedy)
 
 
 class BaseSelectionGroup(Iterable[SelectionSpec], metaclass=ABCMeta):
@@ -160,10 +165,12 @@ class BaseSelectionGroup(Iterable[SelectionSpec], metaclass=ABCMeta):
         self,
         components: Iterable[SelectionSpec],
         expect_exists: bool = False,
+        greedy_warning: bool = True,
         raw: Any = None,
     ):
         self.components: List[SelectionSpec] = list(components)
         self.expect_exists = expect_exists
+        self.greedy_warning = greedy_warning
         self.raw = raw
 
     def __iter__(self) -> Iterator[SelectionSpec]:

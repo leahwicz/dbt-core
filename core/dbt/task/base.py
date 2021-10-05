@@ -7,6 +7,7 @@ from typing import Type, Union, Dict, Any, Optional
 
 from dbt import tracking
 from dbt import ui
+from dbt import flags
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.results import (
     NodeStatus, RunResult, collect_timing_info, RunStatus
@@ -21,7 +22,7 @@ from .printer import print_skip_caused_by_error, print_skip_line
 
 from dbt.adapters.factory import register_adapter
 from dbt.config import RuntimeConfig, Project
-from dbt.config.profile import read_profile, PROFILES_DIR
+from dbt.config.profile import read_profile
 import dbt.exceptions
 
 
@@ -34,7 +35,7 @@ class NoneConfig:
 def read_profiles(profiles_dir=None):
     """This is only used for some error handling"""
     if profiles_dir is None:
-        profiles_dir = PROFILES_DIR
+        profiles_dir = flags.PROFILES_DIR
 
     raw_profiles = read_profile(profiles_dir)
 
@@ -58,12 +59,20 @@ class BaseTask(metaclass=ABCMeta):
 
     def __init__(self, args, config):
         self.args = args
+        self.args.single_threaded = False
         self.config = config
 
     @classmethod
     def pre_init_hook(cls, args):
         """A hook called before the task is initialized."""
         if args.log_format == 'json':
+            log_manager.format_json()
+        else:
+            log_manager.format_text()
+
+    @classmethod
+    def set_log_format(cls):
+        if flags.LOG_FORMAT == 'json':
             log_manager.format_json()
         else:
             log_manager.format_text()
@@ -84,7 +93,7 @@ class BaseTask(metaclass=ABCMeta):
             logger.error("Encountered an error while reading profiles:")
             logger.error("  ERROR {}".format(str(exc)))
 
-            all_profiles = read_profiles(args.profiles_dir).keys()
+            all_profiles = read_profiles(flags.PROFILES_DIR).keys()
 
             if len(all_profiles) > 0:
                 logger.info("Defined profiles:")
@@ -157,7 +166,7 @@ class ConfiguredTask(BaseTask):
 
 
 INTERNAL_ERROR_STRING = """This is an error in dbt. Please try again. If \
-the error persists, open an issue at https://github.com/fishtown-analytics/dbt
+the error persists, open an issue at https://github.com/dbt-labs/dbt
 """.strip()
 
 
@@ -214,7 +223,7 @@ class BaseRunner(metaclass=ABCMeta):
         return result
 
     def _build_run_result(self, node, start_time, status, timing_info, message,
-                          agate_table=None, adapter_response=None):
+                          agate_table=None, adapter_response=None, failures=None):
         execution_time = time.time() - start_time
         thread_id = threading.current_thread().name
         if adapter_response is None:
@@ -227,7 +236,8 @@ class BaseRunner(metaclass=ABCMeta):
             message=message,
             node=node,
             agate_table=agate_table,
-            adapter_response=adapter_response
+            adapter_response=adapter_response,
+            failures=failures
         )
 
     def error_result(self, node, message, start_time, timing_info):
@@ -256,7 +266,8 @@ class BaseRunner(metaclass=ABCMeta):
             timing_info=timing_info,
             message=result.message,
             agate_table=result.agate_table,
-            adapter_response=result.adapter_response
+            adapter_response=result.adapter_response,
+            failures=result.failures
         )
 
     def skip_result(self, node, message):
@@ -268,7 +279,8 @@ class BaseRunner(metaclass=ABCMeta):
             timing=[],
             message=message,
             node=node,
-            adapter_response={}
+            adapter_response={},
+            failures=None
         )
 
     def compile_and_execute(self, manifest, ctx):

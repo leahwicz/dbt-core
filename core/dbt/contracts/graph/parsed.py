@@ -1,5 +1,7 @@
 import os
+import time
 from dataclasses import dataclass, field
+from mashumaro.types import SerializableType
 from pathlib import Path
 from typing import (
     Optional,
@@ -99,8 +101,8 @@ class HasRelationMetadata(dbtClassMixin, Replaceable):
     # because it messes up the subclasses and default parameters
     # so hack it here
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
-        data = super().__pre_deserialize__(data, options=options)
+    def __pre_deserialize__(cls, data):
+        data = super().__pre_deserialize__(data)
         if 'database' not in data:
             data['database'] = None
         return data
@@ -114,6 +116,21 @@ class ParsedNodeMixins(dbtClassMixin):
     @property
     def is_refable(self):
         return self.resource_type in NodeType.refable()
+
+    @property
+    def should_store_failures(self):
+        return self.resource_type == NodeType.Test and (
+            self.config.store_failures if self.config.store_failures is not None
+            else flags.STORE_FAILURES
+        )
+
+    # will this node map to an object in the database?
+    @property
+    def is_relational(self):
+        return (
+            self.resource_type in NodeType.refable() or
+            self.should_store_failures
+        )
 
     @property
     def is_ephemeral(self):
@@ -131,24 +148,17 @@ class ParsedNodeMixins(dbtClassMixin):
         """Given a ParsedNodePatch, add the new information to the node."""
         # explicitly pick out the parts to update so we don't inadvertently
         # step on the model name or anything
-        self.patch_path: Optional[str] = patch.original_file_path
+        # Note: config should already be updated
+        self.patch_path: Optional[str] = patch.file_id
+        # update created_at so process_docs will run in partial parsing
+        self.created_at = int(time.time())
         self.description = patch.description
         self.columns = patch.columns
         self.meta = patch.meta
         self.docs = patch.docs
-        if flags.STRICT_MODE:
-            # It seems odd that an instance can be invalid
-            # Maybe there should be validation or restrictions
-            # elsewhere?
-            assert isinstance(self, dbtClassMixin)
-            dct = self.to_dict(options={'keep_none': True})
-            self.validate(dct)
 
     def get_materialization(self):
         return self.config.materialized
-
-    def local_vars(self):
-        return self.config.vars
 
 
 @dataclass
@@ -179,9 +189,12 @@ class ParsedNodeDefaults(ParsedNodeMandatory):
     meta: Dict[str, Any] = field(default_factory=dict)
     docs: Docs = field(default_factory=Docs)
     patch_path: Optional[str] = None
+    compiled_path: Optional[str] = None
     build_path: Optional[str] = None
     deferred: bool = False
     unrendered_config: Dict[str, Any] = field(default_factory=dict)
+    created_at: int = field(default_factory=lambda: int(time.time()))
+    config_call_dict: Dict[str, Any] = field(default_factory=dict)
 
     def write_node(self, target_path: str, subdirectory: str, payload: str):
         if (os.path.basename(self.path) ==
@@ -203,12 +216,55 @@ T = TypeVar('T', bound='ParsedNode')
 
 
 @dataclass
-class ParsedNode(ParsedNodeDefaults, ParsedNodeMixins):
+class ParsedNode(ParsedNodeDefaults, ParsedNodeMixins, SerializableType):
+
+    def _serialize(self):
+        return self.to_dict()
+
+    def __post_serialize__(self, dct):
+        if 'config_call_dict' in dct:
+            del dct['config_call_dict']
+        return dct
+
+    @classmethod
+    def _deserialize(cls, dct: Dict[str, int]):
+        # The serialized ParsedNodes do not differ from each other
+        # in fields that would allow 'from_dict' to distinguis
+        # between them.
+        resource_type = dct['resource_type']
+        if resource_type == 'model':
+            return ParsedModelNode.from_dict(dct)
+        elif resource_type == 'analysis':
+            return ParsedAnalysisNode.from_dict(dct)
+        elif resource_type == 'seed':
+            return ParsedSeedNode.from_dict(dct)
+        elif resource_type == 'rpc':
+            return ParsedRPCNode.from_dict(dct)
+        elif resource_type == 'test':
+            if 'test_metadata' in dct:
+                return ParsedGenericTestNode.from_dict(dct)
+            else:
+                return ParsedSingularTestNode.from_dict(dct)
+        elif resource_type == 'operation':
+            return ParsedHookNode.from_dict(dct)
+        elif resource_type == 'seed':
+            return ParsedSeedNode.from_dict(dct)
+        elif resource_type == 'snapshot':
+            return ParsedSnapshotNode.from_dict(dct)
+        else:
+            return cls.from_dict(dct)
+
     def _persist_column_docs(self) -> bool:
-        return bool(self.config.persist_docs.get('columns'))
+        if hasattr(self.config, 'persist_docs'):
+            assert isinstance(self.config, NodeConfig)
+            return bool(self.config.persist_docs.get('columns'))
+        return False
 
     def _persist_relation_docs(self) -> bool:
-        return bool(self.config.persist_docs.get('relation'))
+        if hasattr(self.config, 'persist_docs'):
+            assert isinstance(self.config, NodeConfig)
+            return bool(self.config.persist_docs.get('relation'))
+        return False
 
     def same_body(self: T, other: T) -> bool:
         return self.raw_sql == other.raw_sql
@@ -356,26 +412,21 @@ class HasTestMetadata(dbtClassMixin):
 
 
 @dataclass
-class ParsedDataTestNode(ParsedNode):
+class ParsedSingularTestNode(ParsedNode):
     resource_type: NodeType = field(metadata={'restrict': [NodeType.Test]})
-    config: TestConfig = field(default_factory=TestConfig)
+    # Was not able to make mypy happy and keep the code working. We need to
+    # refactor the various configs.
+    config: TestConfig = field(default_factory=TestConfig)  # type: ignore
 
 
 @dataclass
-class ParsedSchemaTestNode(ParsedNode, HasTestMetadata):
-    # keep this in sync with CompiledSchemaTestNode!
+class ParsedGenericTestNode(ParsedNode, HasTestMetadata):
+    # keep this in sync with CompiledGenericTestNode!
     resource_type: NodeType = field(metadata={'restrict': [NodeType.Test]})
     column_name: Optional[str] = None
-    config: TestConfig = field(default_factory=TestConfig)
-
-    def same_config(self, other) -> bool:
-        return (
-            self.unrendered_config.get('severity') ==
-            other.unrendered_config.get('severity')
-        )
-
-    def same_column_name(self, other) -> bool:
-        return self.column_name == other.column_name
+    # Was not able to make mypy happy and keep the code working. We need to
+    # refactor the various configs.
+    config: TestConfig = field(default_factory=TestConfig)  # type: ignore
 
     def same_contents(self, other) -> bool:
         if other is None:
@@ -412,6 +463,7 @@ class ParsedPatch(HasYamlMetadata, Replaceable):
     description: str
     meta: Dict[str, Any]
     docs: Docs
+    config: Dict[str, Any]
 
 
 # The parsed node update is only the 'patch', not the test. The test became a
@@ -441,21 +493,15 @@ class ParsedMacro(UnparsedBaseNode, HasUniqueID):
     docs: Docs = field(default_factory=Docs)
     patch_path: Optional[str] = None
     arguments: List[MacroArgument] = field(default_factory=list)
-
-    def local_vars(self):
-        return {}
+    created_at: int = field(default_factory=lambda: int(time.time()))
 
     def patch(self, patch: ParsedMacroPatch):
-        self.patch_path: Optional[str] = patch.original_file_path
+        self.patch_path: Optional[str] = patch.file_id
         self.description = patch.description
+        self.created_at = int(time.time())
         self.meta = patch.meta
         self.docs = patch.docs
         self.arguments = patch.arguments
-        if flags.STRICT_MODE:
-            # What does this actually validate?
-            assert isinstance(self, dbtClassMixin)
-            dct = self.to_dict(options={'keep_none': True})
-            self.validate(dct)
 
     def same_contents(self, other: Optional['ParsedMacro']) -> bool:
         if other is None:
@@ -546,7 +592,8 @@ class ParsedSourceDefinition(
     UnparsedBaseNode,
     HasUniqueID,
     HasRelationMetadata,
-    HasFqn
+    HasFqn,
+
 ):
     name: str
     source_name: str
@@ -567,6 +614,7 @@ class ParsedSourceDefinition(
     patch_path: Optional[Path] = None
     unrendered_config: Dict[str, Any] = field(default_factory=dict)
     relation_name: Optional[str] = None
+    created_at: int = field(default_factory=lambda: int(time.time()))
 
     def same_database_representation(
         self, other: 'ParsedSourceDefinition'
@@ -643,6 +691,10 @@ class ParsedSourceDefinition(
         return []
 
     @property
+    def depends_on(self):
+        return DependsOn(macros=[], nodes=[])
+
+    @property
     def refs(self):
         return []
 
@@ -667,10 +719,13 @@ class ParsedExposure(UnparsedBaseNode, HasUniqueID, HasFqn):
     resource_type: NodeType = NodeType.Exposure
     description: str = ''
     maturity: Optional[MaturityType] = None
+    meta: Dict[str, Any] = field(default_factory=dict)
+    tags: List[str] = field(default_factory=list)
     url: Optional[str] = None
     depends_on: DependsOn = field(default_factory=DependsOn)
     refs: List[List[str]] = field(default_factory=list)
     sources: List[List[str]] = field(default_factory=list)
+    created_at: int = field(default_factory=lambda: int(time.time()))
 
     @property
     def depends_on_nodes(self):
@@ -679,11 +734,6 @@ class ParsedExposure(UnparsedBaseNode, HasUniqueID, HasFqn):
     @property
     def search_name(self):
         return self.name
-
-    # no tags for now, but we could definitely add them
-    @property
-    def tags(self):
-        return []
 
     def same_depends_on(self, old: 'ParsedExposure') -> bool:
         return set(self.depends_on.nodes) == set(old.depends_on.nodes)
@@ -705,6 +755,7 @@ class ParsedExposure(UnparsedBaseNode, HasUniqueID, HasFqn):
 
     def same_contents(self, old: Optional['ParsedExposure']) -> bool:
         # existing when it didn't before is a change!
+        # metadata/tags changes are not "changes"
         if old is None:
             return True
 
@@ -718,6 +769,18 @@ class ParsedExposure(UnparsedBaseNode, HasUniqueID, HasFqn):
             self.same_depends_on(old) and
             True
         )
+
+
+ManifestNodes = Union[
+    ParsedAnalysisNode,
+    ParsedSingularTestNode,
+    ParsedHookNode,
+    ParsedModelNode,
+    ParsedRPCNode,
+    ParsedGenericTestNode,
+    ParsedSeedNode,
+    ParsedSnapshotNode,
+]
 
 
 ParsedResource = Union[

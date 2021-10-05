@@ -6,9 +6,15 @@ import decimal
 import functools
 import hashlib
 import itertools
+import jinja2
 import json
 import os
+import requests
+import time
+
 from contextlib import contextmanager
+from dbt.exceptions import ConnectionException
+from dbt.logger import GLOBAL_LOGGER as logger
 from enum import Enum
 from typing_extensions import Protocol
 from typing import (
@@ -72,33 +78,30 @@ DOCS_PREFIX = 'dbt_docs__'
 def get_dbt_macro_name(name):
     if name is None:
         raise dbt.exceptions.InternalException('Got None for a macro name!')
-    return '{}{}'.format(MACRO_PREFIX, name)
+    return f'{MACRO_PREFIX}{name}'
 
 
 def get_dbt_docs_name(name):
     if name is None:
         raise dbt.exceptions.InternalException('Got None for a doc name!')
-    return '{}{}'.format(DOCS_PREFIX, name)
+    return f'{DOCS_PREFIX}{name}'
 
 
 def get_materialization_macro_name(materialization_name, adapter_type=None,
                                    with_prefix=True):
     if adapter_type is None:
         adapter_type = 'default'
-
-    name = 'materialization_{}_{}'.format(materialization_name, adapter_type)
-
-    if with_prefix:
-        return get_dbt_macro_name(name)
-    else:
-        return name
+    name = f'materialization_{materialization_name}_{adapter_type}'
+    return get_dbt_macro_name(name) if with_prefix else name
 
 
 def get_docs_macro_name(docs_name, with_prefix=True):
-    if with_prefix:
-        return get_dbt_docs_name(docs_name)
-    else:
-        return docs_name
+    return get_dbt_docs_name(docs_name) if with_prefix else docs_name
+
+
+def get_test_macro_name(test_name, with_prefix=True):
+    name = f'test_{test_name}'
+    return get_dbt_macro_name(name) if with_prefix else name
 
 
 def split_path(path):
@@ -229,11 +232,11 @@ class AttrDict(dict):
         self.__dict__ = self
 
 
-def get_pseudo_test_path(node_name, source_path, test_type):
+def get_pseudo_test_path(node_name, source_path):
     "schema tests all come from schema.yml files. fake a source sql file"
     source_path_parts = split_path(source_path)
     source_path_parts.pop()  # ignore filename
-    suffix = [test_type, "{}.sql".format(node_name)]
+    suffix = ["{}.sql".format(node_name)]
     pseudo_path_parts = source_path_parts + suffix
     return os.path.join(*pseudo_path_parts)
 
@@ -309,18 +312,20 @@ def timestring() -> str:
 
 class JSONEncoder(json.JSONEncoder):
     """A 'custom' json encoder that does normal json encoder things, but also
-    handles `Decimal`s. Naturally, this can lose precision because they get
-    converted to floats.
+    handles `Decimal`s. and `Undefined`s. Decimals can lose precision because
+    they get converted to floats. Undefined's are serialized to an empty string
     """
     def default(self, obj):
         if isinstance(obj, DECIMALS):
             return float(obj)
         if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
             return obj.isoformat()
+        if isinstance(obj, jinja2.Undefined):
+            return ""
         if hasattr(obj, 'to_dict'):
             # if we have a to_dict we should try to serialize the result of
             # that!
-            return obj.to_dict()
+            return obj.to_dict(omit_none=True)
         return super().default(obj)
 
 
@@ -407,6 +412,8 @@ def pluralize(count, string: Union[str, NodeType]):
     return f'{count} {pluralized}'
 
 
+# Note that this only affects hologram json validation.
+# It has no effect on mashumaro serialization.
 def restrict_to(*restrictions):
     """Create the metadata for a restricted dataclass field"""
     return {'restrict': list(restrictions)}
@@ -421,6 +428,12 @@ def coerce_dict_str(value: Any) -> Optional[Dict[str, Any]]:
         return value
     else:
         return None
+
+
+def _coerce_decimal(value):
+    if isinstance(value, DECIMALS):
+        return float(value)
+    return value
 
 
 def lowercase(value: Optional[str]) -> Optional[str]:
@@ -594,3 +607,19 @@ class MultiDict(Mapping[str, Any]):
 
     def __contains__(self, name) -> bool:
         return any((name in entry for entry in self._itersource()))
+
+
+def _connection_exception_retry(fn, max_attempts: int, attempt: int = 0):
+    """Attempts to run a function that makes an external call, if the call fails
+    on a connection error or timeout, it will be tried up to 5 more times.
+    """
+    try:
+        return fn()
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+        if attempt <= max_attempts - 1:
+            logger.debug('Retrying external call. Attempt: ' +
+                         f'{attempt} Max attempts: {max_attempts}')
+            time.sleep(1)
+            _connection_exception_retry(fn, max_attempts, attempt + 1)
+        else:
+            raise ConnectionException('External connection exception occurred: ' + str(exc))

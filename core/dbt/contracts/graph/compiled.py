@@ -2,13 +2,13 @@ from dbt.contracts.graph.parsed import (
     HasTestMetadata,
     ParsedNode,
     ParsedAnalysisNode,
-    ParsedDataTestNode,
+    ParsedSingularTestNode,
     ParsedHookNode,
     ParsedModelNode,
     ParsedExposure,
     ParsedResource,
     ParsedRPCNode,
-    ParsedSchemaTestNode,
+    ParsedGenericTestNode,
     ParsedSeedNode,
     ParsedSnapshotNode,
     ParsedSourceDefinition,
@@ -43,6 +43,7 @@ class CompiledNode(ParsedNode, CompiledNodeMixin):
     extra_ctes_injected: bool = False
     extra_ctes: List[InjectedCTE] = field(default_factory=list)
     relation_name: Optional[str] = None
+    _pre_injected_sql: Optional[str] = None
 
     def set_cte(self, cte_id: str, sql: str):
         """This is the equivalent of what self.extra_ctes[cte_id] = sql would
@@ -54,6 +55,12 @@ class CompiledNode(ParsedNode, CompiledNodeMixin):
                 break
         else:
             self.extra_ctes.append(InjectedCTE(id=cte_id, sql=sql))
+
+    def __post_serialize__(self, dct):
+        dct = super().__post_serialize__(dct)
+        if '_pre_injected_sql' in dct:
+            del dct['_pre_injected_sql']
+        return dct
 
 
 @dataclass
@@ -100,26 +107,21 @@ class CompiledSnapshotNode(CompiledNode):
 
 
 @dataclass
-class CompiledDataTestNode(CompiledNode):
+class CompiledSingularTestNode(CompiledNode):
     resource_type: NodeType = field(metadata={'restrict': [NodeType.Test]})
-    config: TestConfig = field(default_factory=TestConfig)
+    # Was not able to make mypy happy and keep the code working. We need to
+    # refactor the various configs.
+    config: TestConfig = field(default_factory=TestConfig)  # type:ignore
 
 
 @dataclass
-class CompiledSchemaTestNode(CompiledNode, HasTestMetadata):
-    # keep this in sync with ParsedSchemaTestNode!
+class CompiledGenericTestNode(CompiledNode, HasTestMetadata):
+    # keep this in sync with ParsedGenericTestNode!
     resource_type: NodeType = field(metadata={'restrict': [NodeType.Test]})
     column_name: Optional[str] = None
-    config: TestConfig = field(default_factory=TestConfig)
-
-    def same_config(self, other) -> bool:
-        return (
-            self.unrendered_config.get('severity') ==
-            other.unrendered_config.get('severity')
-        )
-
-    def same_column_name(self, other) -> bool:
-        return self.column_name == other.column_name
+    # Was not able to make mypy happy and keep the code working. We need to
+    # refactor the various configs.
+    config: TestConfig = field(default_factory=TestConfig)  # type:ignore
 
     def same_contents(self, other) -> bool:
         if other is None:
@@ -132,7 +134,7 @@ class CompiledSchemaTestNode(CompiledNode, HasTestMetadata):
         )
 
 
-CompiledTestNode = Union[CompiledDataTestNode, CompiledSchemaTestNode]
+CompiledTestNode = Union[CompiledSingularTestNode, CompiledGenericTestNode]
 
 
 PARSED_TYPES: Dict[Type[CompiledNode], Type[ParsedResource]] = {
@@ -142,8 +144,8 @@ PARSED_TYPES: Dict[Type[CompiledNode], Type[ParsedResource]] = {
     CompiledRPCNode: ParsedRPCNode,
     CompiledSeedNode: ParsedSeedNode,
     CompiledSnapshotNode: ParsedSnapshotNode,
-    CompiledDataTestNode: ParsedDataTestNode,
-    CompiledSchemaTestNode: ParsedSchemaTestNode,
+    CompiledSingularTestNode: ParsedSingularTestNode,
+    CompiledGenericTestNode: ParsedGenericTestNode,
 }
 
 
@@ -154,8 +156,8 @@ COMPILED_TYPES: Dict[Type[ParsedResource], Type[CompiledNode]] = {
     ParsedRPCNode: CompiledRPCNode,
     ParsedSeedNode: CompiledSeedNode,
     ParsedSnapshotNode: CompiledSnapshotNode,
-    ParsedDataTestNode: CompiledDataTestNode,
-    ParsedSchemaTestNode: CompiledSchemaTestNode,
+    ParsedSingularTestNode: CompiledSingularTestNode,
+    ParsedGenericTestNode: CompiledGenericTestNode,
 }
 
 
@@ -178,27 +180,27 @@ def parsed_instance_for(compiled: CompiledNode) -> ParsedResource:
         raise ValueError('invalid resource_type: {}'
                          .format(compiled.resource_type))
 
-    return cls.from_dict(compiled.to_dict())
+    return cls.from_dict(compiled.to_dict(omit_none=True))
 
 
 NonSourceCompiledNode = Union[
     CompiledAnalysisNode,
-    CompiledDataTestNode,
+    CompiledSingularTestNode,
     CompiledModelNode,
     CompiledHookNode,
     CompiledRPCNode,
-    CompiledSchemaTestNode,
+    CompiledGenericTestNode,
     CompiledSeedNode,
     CompiledSnapshotNode,
 ]
 
 NonSourceParsedNode = Union[
     ParsedAnalysisNode,
-    ParsedDataTestNode,
+    ParsedSingularTestNode,
     ParsedHookNode,
     ParsedModelNode,
     ParsedRPCNode,
-    ParsedSchemaTestNode,
+    ParsedGenericTestNode,
     ParsedSeedNode,
     ParsedSnapshotNode,
 ]

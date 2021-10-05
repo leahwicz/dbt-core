@@ -8,7 +8,9 @@ from typing_extensions import Protocol
 
 from dbt import deprecations
 from dbt.adapters.base.column import Column
-from dbt.adapters.factory import get_adapter, get_adapter_package_names
+from dbt.adapters.factory import (
+    get_adapter, get_adapter_package_names, get_adapter_type_names
+)
 from dbt.clients import agate_helper
 from dbt.clients.jinja import get_rendered, MacroGenerator, MacroStack
 from dbt.config import RuntimeConfig, Project
@@ -20,7 +22,7 @@ from .macros import MacroNamespaceBuilder, MacroNamespace
 from .manifest import ManifestContext
 from dbt.contracts.connection import AdapterResponse
 from dbt.contracts.graph.manifest import (
-    Manifest, AnyManifest, Disabled, MacroManifest
+    Manifest, Disabled
 )
 from dbt.contracts.graph.compiled import (
     CompiledResource,
@@ -107,14 +109,18 @@ class BaseDatabaseWrapper:
         return self._adapter.commit_if_has_connection()
 
     def _get_adapter_macro_prefixes(self) -> List[str]:
-        # a future version of this could have plugins automatically call fall
-        # back to their dependencies' dependencies by using
-        # `get_adapter_type_names` instead of `[self.config.credentials.type]`
-        search_prefixes = [self._adapter.type(), 'default']
+        # order matters for dispatch:
+        #  1. current adapter
+        #  2. any parent adapters (dependencies)
+        #  3. 'default'
+        search_prefixes = get_adapter_type_names(self._adapter.type()) + ['default']
         return search_prefixes
 
     def dispatch(
-        self, macro_name: str, packages: Optional[List[str]] = None
+        self,
+        macro_name: str,
+        macro_namespace: Optional[str] = None,
+        packages: Optional[List[str]] = None,
     ) -> MacroGenerator:
         search_packages: List[Optional[str]]
 
@@ -128,15 +134,25 @@ class BaseDatabaseWrapper:
             )
             raise CompilationException(msg)
 
-        if packages is None:
+        if packages is not None:
+            deprecations.warn('dispatch-packages', macro_name=macro_name)
+
+        namespace = packages if packages else macro_namespace
+
+        if namespace is None:
             search_packages = [None]
-        elif isinstance(packages, str):
-            raise CompilationException(
-                f'In adapter.dispatch, got a string packages argument '
-                f'("{packages}"), but packages should be None or a list.'
-            )
+        elif isinstance(namespace, str):
+            search_packages = self._adapter.config.get_macro_search_order(namespace)
+            if not search_packages and namespace in self._adapter.config.dependencies:
+                search_packages = [namespace]
+            if not search_packages:
+                raise CompilationException(
+                    f'In adapter.dispatch, got a string packages argument '
+                    f'("{packages}"), but packages should be None or a list.'
+                )
         else:
-            search_packages = packages
+            # Not a string and not None so must be a list
+            search_packages = namespace
 
         attempts = []
 
@@ -263,7 +279,7 @@ class Config(Protocol):
         ...
 
 
-# `config` implementations
+# Implementation of "config(..)" calls in models
 class ParseConfigObject(Config):
     def __init__(self, model, context_config: Optional[ContextConfig]):
         self.model = model
@@ -300,7 +316,7 @@ class ParseConfigObject(Config):
             raise RuntimeException(
                 'At parse time, did not receive a context config'
             )
-        self.context_config.update_in_model_config(opts)
+        self.context_config.add_config_call(opts)
         return ''
 
     def set(self, name, value):
@@ -1115,7 +1131,7 @@ class ProviderContext(ManifestContext):
 
     @contextproperty('model')
     def ctx_model(self) -> Dict[str, Any]:
-        return self.model.to_dict()
+        return self.model.to_dict(omit_none=True)
 
     @contextproperty
     def pre_hooks(self) -> Optional[List[Dict[str, Any]]]:
@@ -1135,66 +1151,17 @@ class ProviderContext(ManifestContext):
 
     @contextmember
     def adapter_macro(self, name: str, *args, **kwargs):
-        """Find the most appropriate macro for the name, considering the
-        adapter type currently in use, and call that with the given arguments.
-
-        If the name has a `.` in it, the first section before the `.` is
-        interpreted as a package name, and the remainder as a macro name.
-
-        If no adapter is found, raise a compiler exception. If an invalid
-        package name is specified, raise a compiler exception.
-
-
-        Some examples:
-
-            {# dbt will call this macro by name, providing any arguments #}
-            {% macro create_table_as(temporary, relation, sql) -%}
-
-              {# dbt will dispatch the macro call to the relevant macro #}
-              {{ adapter_macro('create_table_as', temporary, relation, sql) }}
-            {%- endmacro %}
-
-
-            {#
-                If no macro matches the specified adapter, "default" will be
-                used
-            #}
-            {% macro default__create_table_as(temporary, relation, sql) -%}
-               ...
-            {%- endmacro %}
-
-
-
-            {# Example which defines special logic for Redshift #}
-            {% macro redshift__create_table_as(temporary, relation, sql) -%}
-               ...
-            {%- endmacro %}
-
-
-
-            {# Example which defines special logic for BigQuery #}
-            {% macro bigquery__create_table_as(temporary, relation, sql) -%}
-               ...
-            {%- endmacro %}
+        """This was deprecated in v0.18 in favor of adapter.dispatch
         """
-        deprecations.warn('adapter-macro', macro_name=name)
-        original_name = name
-        package_names: Optional[List[str]] = None
-        if '.' in name:
-            package_name, name = name.split('.', 1)
-            package_names = [package_name]
-
-        try:
-            macro = self.db_wrapper.dispatch(
-                macro_name=name, packages=package_names
-            )
-        except CompilationException as exc:
-            raise CompilationException(
-                f'In adapter_macro: {exc.msg}\n'
-                f"    Original name: '{original_name}'",
-                node=self.model
-            ) from exc
-        return macro(*args, **kwargs)
+        msg = (
+            'The "adapter_macro" macro has been deprecated. Instead, use '
+            'the `adapter.dispatch` method to find a macro and call the '
+            'result.  For more information, see: '
+            'https://docs.getdbt.com/reference/dbt-jinja-functions/dispatch)'
+            ' adapter_macro was called for: {macro_name}'
+            .format(macro_name=name)
+        )
+        raise CompilationException(msg)
 
 
 class MacroContext(ProviderContext):
@@ -1210,7 +1177,7 @@ class MacroContext(ProviderContext):
         self,
         model: ParsedMacro,
         config: RuntimeConfig,
-        manifest: AnyManifest,
+        manifest: Manifest,
         provider: Provider,
         search_package: Optional[str],
     ) -> None:
@@ -1228,18 +1195,18 @@ class ModelContext(ProviderContext):
 
     @contextproperty
     def pre_hooks(self) -> List[Dict[str, Any]]:
-        if isinstance(self.model, ParsedSourceDefinition):
+        if self.model.resource_type in [NodeType.Source, NodeType.Test]:
             return []
         return [
-            h.to_dict() for h in self.model.config.pre_hook
+            h.to_dict(omit_none=True) for h in self.model.config.pre_hook
         ]
 
     @contextproperty
     def post_hooks(self) -> List[Dict[str, Any]]:
-        if isinstance(self.model, ParsedSourceDefinition):
+        if self.model.resource_type in [NodeType.Source, NodeType.Test]:
             return []
         return [
-            h.to_dict() for h in self.model.config.post_hook
+            h.to_dict(omit_none=True) for h in self.model.config.post_hook
         ]
 
     @contextproperty
@@ -1300,7 +1267,7 @@ class ModelContext(ProviderContext):
 def generate_parser_model(
     model: ManifestNode,
     config: RuntimeConfig,
-    manifest: MacroManifest,
+    manifest: Manifest,
     context_config: ContextConfig,
 ) -> Dict[str, Any]:
     # The __init__ method of ModelContext also initializes
@@ -1317,7 +1284,7 @@ def generate_parser_model(
 def generate_generate_component_name_macro(
     macro: ParsedMacro,
     config: RuntimeConfig,
-    manifest: MacroManifest,
+    manifest: Manifest,
 ) -> Dict[str, Any]:
     ctx = MacroContext(
         macro, config, manifest, GenerateNameProvider(), None
@@ -1370,7 +1337,7 @@ class ExposureSourceResolver(BaseResolver):
 def generate_parse_exposure(
     exposure: ParsedExposure,
     config: RuntimeConfig,
-    manifest: MacroManifest,
+    manifest: Manifest,
     package_name: str,
 ) -> Dict[str, Any]:
     project = config.load_dependencies()[package_name]
@@ -1408,7 +1375,12 @@ class TestContext(ProviderContext):
         self.macro_resolver = macro_resolver
         self.thread_ctx = MacroStack()
         super().__init__(model, config, manifest, provider, context_config)
-        self._build_test_namespace
+        self._build_test_namespace()
+        # We need to rebuild this because it's already been built by
+        # the ProviderContext with the wrong namespace.
+        self.db_wrapper = self.provider.DatabaseWrapper(
+            self.adapter, self.namespace
+        )
 
     def _build_namespace(self):
         return {}
@@ -1421,11 +1393,17 @@ class TestContext(ProviderContext):
         depends_on_macros = []
         if self.model.depends_on and self.model.depends_on.macros:
             depends_on_macros = self.model.depends_on.macros
+        lookup_macros = depends_on_macros.copy()
+        for macro_unique_id in lookup_macros:
+            lookup_macro = self.macro_resolver.macros.get(macro_unique_id)
+            if lookup_macro:
+                depends_on_macros.extend(lookup_macro.depends_on.macros)
+
         macro_namespace = TestMacroNamespace(
-            self.macro_resolver, self.ctx, self.node, self.thread_ctx,
+            self.macro_resolver, self._ctx, self.model, self.thread_ctx,
             depends_on_macros
         )
-        self._namespace = macro_namespace
+        self.namespace = macro_namespace
 
 
 def generate_test_context(

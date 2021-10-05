@@ -11,7 +11,6 @@ from dbt.contracts.connection import (
     Connection, ConnectionState, AdapterResponse
 )
 from dbt.logger import GLOBAL_LOGGER as logger
-from dbt import flags
 
 
 class SQLConnectionManager(BaseConnectionManager):
@@ -99,7 +98,14 @@ class SQLConnectionManager(BaseConnectionManager):
         column_names: Iterable[str],
         rows: Iterable[Any]
     ) -> List[Dict[str, Any]]:
-
+        unique_col_names = dict()
+        for idx in range(len(column_names)):
+            col_name = column_names[idx]
+            if col_name in unique_col_names:
+                unique_col_names[col_name] += 1
+                column_names[idx] = f'{col_name}_{unique_col_names[col_name]}'
+            else:
+                unique_col_names[column_names[idx]] = 1
         return [dict(zip(column_names, row)) for row in rows]
 
     @classmethod
@@ -137,13 +143,6 @@ class SQLConnectionManager(BaseConnectionManager):
 
     def begin(self):
         connection = self.get_thread_connection()
-
-        if flags.STRICT_MODE:
-            if not isinstance(connection, Connection):
-                raise dbt.exceptions.CompilerException(
-                    f'In begin, got {connection} - not a Connection!'
-                )
-
         if connection.transaction_open is True:
             raise dbt.exceptions.InternalException(
                 'Tried to begin a new transaction on connection "{}", but '
@@ -156,12 +155,6 @@ class SQLConnectionManager(BaseConnectionManager):
 
     def commit(self):
         connection = self.get_thread_connection()
-        if flags.STRICT_MODE:
-            if not isinstance(connection, Connection):
-                raise dbt.exceptions.CompilerException(
-                    f'In commit, got {connection} - not a Connection!'
-                )
-
         if connection.transaction_open is False:
             raise dbt.exceptions.InternalException(
                 'Tried to commit transaction on connection "{}", but '

@@ -1,5 +1,6 @@
 import abc
 import itertools
+import hashlib
 from dataclasses import dataclass, field
 from typing import (
     Any, ClassVar, Dict, Tuple, Iterable, Optional, List, Callable,
@@ -9,7 +10,7 @@ from dbt.utils import translate_aliases
 from dbt.logger import GLOBAL_LOGGER as logger
 from typing_extensions import Protocol
 from dbt.dataclass_schema import (
-    dbtClassMixin, StrEnum, ExtensibleDbtClassMixin,
+    dbtClassMixin, StrEnum, ExtensibleDbtClassMixin, HyphenatedDbtClassMixin,
     ValidatedStringMixin, register_pattern
 )
 from dbt.contracts.util import Replaceable
@@ -127,12 +128,21 @@ class Credentials(
             'type not implemented for base credentials class'
         )
 
+    @abc.abstractproperty
+    def unique_field(self) -> str:
+        raise NotImplementedError(
+            'type not implemented for base credentials class'
+        )
+
+    def hashed_unique_field(self) -> str:
+        return hashlib.md5(self.unique_field.encode('utf-8')).hexdigest()
+
     def connection_info(
         self, *, with_aliases: bool = False
     ) -> Iterable[Tuple[str, Any]]:
         """Return an ordered iterator of key/value pairs for pretty-printing.
         """
-        as_dict = self.to_dict(options={'keep_none': True})
+        as_dict = self.to_dict(omit_none=False)
         connection_keys = set(self._connection_keys())
         aliases: List[str] = []
         if with_aliases:
@@ -148,8 +158,8 @@ class Credentials(
         raise NotImplementedError
 
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
-        data = super().__pre_deserialize__(data, options=options)
+    def __pre_deserialize__(cls, data):
+        data = super().__pre_deserialize__(data)
         data = cls.translate_aliases(data)
         return data
 
@@ -159,7 +169,7 @@ class Credentials(
     ) -> Dict[str, Any]:
         return translate_aliases(kwargs, cls._ALIASES, recurse)
 
-    def __post_serialize__(self, dct, options=None):
+    def __post_serialize__(self, dct):
         # no super() -- do we need it?
         if self._ALIASES:
             dct.update({
@@ -176,14 +186,11 @@ class UserConfigContract(Protocol):
     partial_parse: Optional[bool] = None
     printer_width: Optional[int] = None
 
-    def set_values(self, cookie_dir: str) -> None:
-        ...
-
 
 class HasCredentials(Protocol):
     credentials: Credentials
     profile_name: str
-    config: UserConfigContract
+    user_config: UserConfigContract
     target_name: str
     threads: int
 
@@ -212,9 +219,10 @@ DEFAULT_QUERY_COMMENT = '''
 
 
 @dataclass
-class QueryComment(dbtClassMixin):
+class QueryComment(HyphenatedDbtClassMixin):
     comment: str = DEFAULT_QUERY_COMMENT
     append: bool = False
+    job_label: bool = False
 
 
 class AdapterRequiredConfig(HasCredentials, Protocol):

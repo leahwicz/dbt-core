@@ -1,23 +1,24 @@
 
 
 {% macro get_merge_sql(target, source, unique_key, dest_columns, predicates=none) -%}
-  {{ adapter.dispatch('get_merge_sql')(target, source, unique_key, dest_columns, predicates) }}
+  {{ adapter.dispatch('get_merge_sql', 'dbt')(target, source, unique_key, dest_columns, predicates) }}
 {%- endmacro %}
 
 
 {% macro get_delete_insert_merge_sql(target, source, unique_key, dest_columns) -%}
-  {{ adapter.dispatch('get_delete_insert_merge_sql')(target, source, unique_key, dest_columns) }}
+  {{ adapter.dispatch('get_delete_insert_merge_sql', 'dbt')(target, source, unique_key, dest_columns) }}
 {%- endmacro %}
 
 
 {% macro get_insert_overwrite_merge_sql(target, source, dest_columns, predicates, include_sql_header=false) -%}
-  {{ adapter.dispatch('get_insert_overwrite_merge_sql')(target, source, dest_columns, predicates, include_sql_header) }}
+  {{ adapter.dispatch('get_insert_overwrite_merge_sql', 'dbt')(target, source, dest_columns, predicates, include_sql_header) }}
 {%- endmacro %}
 
 
 {% macro default__get_merge_sql(target, source, unique_key, dest_columns, predicates) -%}
     {%- set predicates = [] if predicates is none else [] + predicates -%}
     {%- set dest_cols_csv = get_quoted_csv(dest_columns | map(attribute="name")) -%}
+    {%- set update_columns = config.get('merge_update_columns', default = dest_columns | map(attribute="quoted") | list) -%}
     {%- set sql_header = config.get('sql_header', none) -%}
 
     {% if unique_key %}
@@ -37,8 +38,8 @@
 
     {% if unique_key %}
     when matched then update set
-        {% for column in dest_columns -%}
-            {{ adapter.quote(column.name) }} = DBT_INTERNAL_SOURCE.{{ adapter.quote(column.name) }}
+        {% for column_name in update_columns -%}
+            {{ column_name }} = DBT_INTERNAL_SOURCE.{{ column_name }}
             {%- if not loop.last %}, {%- endif %}
         {%- endfor %}
     {% endif %}
@@ -78,7 +79,7 @@
     (
         select {{ dest_cols_csv }}
         from {{ source }}
-    );
+    )
 
 {%- endmacro %}
 

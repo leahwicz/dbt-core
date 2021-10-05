@@ -21,15 +21,16 @@ import jinja2.sandbox
 
 from dbt.utils import (
     get_dbt_macro_name, get_docs_macro_name, get_materialization_macro_name,
-    deep_map
+    get_test_macro_name, deep_map
 )
 
 from dbt.clients._jinja_blocks import BlockIterator, BlockData, BlockTag
-from dbt.contracts.graph.compiled import CompiledSchemaTestNode
-from dbt.contracts.graph.parsed import ParsedSchemaTestNode
+from dbt.contracts.graph.compiled import CompiledGenericTestNode
+from dbt.contracts.graph.parsed import ParsedGenericTestNode
 from dbt.exceptions import (
     InternalException, raise_compiler_error, CompilationException,
-    invalid_materialization_argument, MacroReturn, JinjaRenderingException
+    invalid_materialization_argument, MacroReturn, JinjaRenderingException,
+    UndefinedMacroException
 )
 from dbt import flags
 from dbt.logger import GLOBAL_LOGGER as logger  # noqa
@@ -408,6 +409,20 @@ class DocumentationExtension(jinja2.ext.Extension):
         return node
 
 
+class TestExtension(jinja2.ext.Extension):
+    tags = ['test']
+
+    def parse(self, parser):
+        node = jinja2.nodes.Macro(lineno=next(parser.stream).lineno)
+        test_name = parser.parse_assign_target(name_only=True).name
+
+        parser.parse_signature(node)
+        node.name = get_test_macro_name(test_name)
+        node.body = parser.parse_statements(('name:endtest',),
+                                            drop_needle=True)
+        return node
+
+
 def _is_dunder_name(name):
     return name.startswith('__') and name.endswith('__')
 
@@ -479,6 +494,7 @@ def get_environment(
 
     args['extensions'].append(MaterializationExtension)
     args['extensions'].append(DocumentationExtension)
+    args['extensions'].append(TestExtension)
 
     env_cls: Type[jinja2.Environment]
     text_filter: Type
@@ -503,7 +519,7 @@ def catch_jinja(node=None) -> Iterator[None]:
         e.translated = False
         raise CompilationException(str(e), node) from e
     except jinja2.exceptions.UndefinedError as e:
-        raise CompilationException(str(e), node) from e
+        raise UndefinedMacroException(str(e), node) from e
     except CompilationException as exc:
         exc.add_node(node)
         raise
@@ -611,12 +627,12 @@ def extract_toplevel_blocks(
     )
 
 
-SCHEMA_TEST_KWARGS_NAME = '_dbt_schema_test_kwargs'
+GENERIC_TEST_KWARGS_NAME = '_dbt_generic_test_kwargs'
 
 
 def add_rendered_test_kwargs(
     context: Dict[str, Any],
-    node: Union[ParsedSchemaTestNode, CompiledSchemaTestNode],
+    node: Union[ParsedGenericTestNode, CompiledGenericTestNode],
     capture_macros: bool = False,
 ) -> None:
     """Render each of the test kwargs in the given context using the native
@@ -646,4 +662,4 @@ def add_rendered_test_kwargs(
         return value
 
     kwargs = deep_map(_convert_function, node.test_metadata.kwargs)
-    context[SCHEMA_TEST_KWARGS_NAME] = kwargs
+    context[GENERIC_TEST_KWARGS_NAME] = kwargs

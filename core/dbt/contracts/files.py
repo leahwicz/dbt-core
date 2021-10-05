@@ -1,23 +1,48 @@
 import hashlib
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from mashumaro.types import SerializableType
+from typing import List, Optional, Union, Dict, Any
 
-from dbt.dataclass_schema import dbtClassMixin
+from dbt.dataclass_schema import dbtClassMixin, StrEnum
 
-from dbt.exceptions import InternalException
-
-from .util import MacroKey, SourceKey
+from .util import SourceKey
 
 
 MAXIMUM_SEED_SIZE = 1 * 1024 * 1024
 MAXIMUM_SEED_SIZE_NAME = '1MB'
 
 
+class ParseFileType(StrEnum):
+    Macro = 'macro'
+    Model = 'model'
+    Snapshot = 'snapshot'
+    Analysis = 'analysis'
+    Test = 'test'
+    Seed = 'seed'
+    Documentation = 'docs'
+    Schema = 'schema'
+    Hook = 'hook'   # not a real filetype, from dbt_project.yml
+
+
+parse_file_type_to_parser = {
+    ParseFileType.Macro: 'MacroParser',
+    ParseFileType.Model: 'ModelParser',
+    ParseFileType.Snapshot: 'SnapshotParser',
+    ParseFileType.Analysis: 'AnalysisParser',
+    ParseFileType.Test: 'SingularTestParser',
+    ParseFileType.Seed: 'SeedParser',
+    ParseFileType.Documentation: 'DocumentationParser',
+    ParseFileType.Schema: 'SchemaParser',
+    ParseFileType.Hook: 'HookParser',
+}
+
+
 @dataclass
 class FilePath(dbtClassMixin):
     searched_path: str
     relative_path: str
+    modification_time: float
     project_root: str
 
     @property
@@ -108,50 +133,61 @@ class RemoteFile(dbtClassMixin):
     def original_file_path(self):
         return 'from remote system'
 
+    @property
+    def modification_time(self):
+        return 'from remote system'
+
 
 @dataclass
-class SourceFile(dbtClassMixin):
+class BaseSourceFile(dbtClassMixin, SerializableType):
     """Define a source file in dbt"""
     path: Union[FilePath, RemoteFile]  # the path information
     checksum: FileHash
+    # Seems like knowing which project the file came from would be useful
+    project_name: Optional[str] = None
+    # Parse file type: i.e. which parser will process this file
+    parse_file_type: Optional[ParseFileType] = None
     # we don't want to serialize this
-    _contents: Optional[str] = None
+    contents: Optional[str] = None
     # the unique IDs contained in this file
+
+    @property
+    def file_id(self):
+        if isinstance(self.path, RemoteFile):
+            return None
+        return f'{self.project_name}://{self.path.original_file_path}'
+
+    def _serialize(self):
+        dct = self.to_dict()
+        return dct
+
+    @classmethod
+    def _deserialize(cls, dct: Dict[str, int]):
+        if dct['parse_file_type'] == 'schema':
+            sf = SchemaSourceFile.from_dict(dct)
+        else:
+            sf = SourceFile.from_dict(dct)
+        return sf
+
+    def __post_serialize__(self, dct):
+        dct = super().__post_serialize__(dct)
+        # remove empty lists to save space
+        dct_keys = list(dct.keys())
+        for key in dct_keys:
+            if isinstance(dct[key], list) and not dct[key]:
+                del dct[key]
+        # remove contents. Schema files will still have 'dict_from_yaml'
+        # from the contents
+        if 'contents' in dct:
+            del dct['contents']
+        return dct
+
+
+@dataclass
+class SourceFile(BaseSourceFile):
     nodes: List[str] = field(default_factory=list)
     docs: List[str] = field(default_factory=list)
     macros: List[str] = field(default_factory=list)
-    sources: List[str] = field(default_factory=list)
-    exposures: List[str] = field(default_factory=list)
-    # any node patches in this file. The entries are names, not unique ids!
-    patches: List[str] = field(default_factory=list)
-    # any macro patches in this file. The entries are package, name pairs.
-    macro_patches: List[MacroKey] = field(default_factory=list)
-    # any source patches in this file. The entries are package, name pairs
-    source_patches: List[SourceKey] = field(default_factory=list)
-
-    @property
-    def search_key(self) -> Optional[str]:
-        if isinstance(self.path, RemoteFile):
-            return None
-        if self.checksum.name == 'none':
-            return None
-        return self.path.search_key
-
-    @property
-    def contents(self) -> str:
-        if self._contents is None:
-            raise InternalException('SourceFile has no contents!')
-        return self._contents
-
-    @contents.setter
-    def contents(self, value):
-        self._contents = value
-
-    @classmethod
-    def empty(cls, path: FilePath) -> 'SourceFile':
-        self = cls(path=path, checksum=FileHash.empty())
-        self.contents = ''
-        return self
 
     @classmethod
     def big_seed(cls, path: FilePath) -> 'SourceFile':
@@ -160,8 +196,106 @@ class SourceFile(dbtClassMixin):
         self.contents = ''
         return self
 
+    def add_node(self, value):
+        if value not in self.nodes:
+            self.nodes.append(value)
+
+    # TODO: do this a different way. This remote file kludge isn't going
+    # to work long term
     @classmethod
-    def remote(cls, contents: str) -> 'SourceFile':
-        self = cls(path=RemoteFile(), checksum=FileHash.empty())
-        self.contents = contents
+    def remote(cls, contents: str, project_name: str) -> 'SourceFile':
+        self = cls(
+            path=RemoteFile(),
+            checksum=FileHash.from_contents(contents),
+            project_name=project_name,
+            contents=contents,
+        )
         return self
+
+
+@dataclass
+class SchemaSourceFile(BaseSourceFile):
+    dfy: Dict[str, Any] = field(default_factory=dict)
+    # these are in the manifest.nodes dictionary
+    tests: Dict[str, Any] = field(default_factory=dict)
+    sources: List[str] = field(default_factory=list)
+    exposures: List[str] = field(default_factory=list)
+    # node patches contain models, seeds, snapshots, analyses
+    ndp: List[str] = field(default_factory=list)
+    # any macro patches in this file by macro unique_id.
+    mcp: Dict[str, str] = field(default_factory=dict)
+    # any source patches in this file. The entries are package, name pairs
+    # Patches are only against external sources. Sources can be
+    # created too, but those are in 'sources'
+    sop: List[SourceKey] = field(default_factory=list)
+    pp_dict: Optional[Dict[str, Any]] = None
+    pp_test_index: Optional[Dict[str, Any]] = None
+
+    @property
+    def dict_from_yaml(self):
+        return self.dfy
+
+    @property
+    def node_patches(self):
+        return self.ndp
+
+    @property
+    def macro_patches(self):
+        return self.mcp
+
+    @property
+    def source_patches(self):
+        return self.sop
+
+    def __post_serialize__(self, dct):
+        dct = super().__post_serialize__(dct)
+        # Remove partial parsing specific data
+        for key in ('pp_files', 'pp_test_index', 'pp_dict'):
+            if key in dct:
+                del dct[key]
+        return dct
+
+    def append_patch(self, yaml_key, unique_id):
+        self.node_patches.append(unique_id)
+
+    def add_test(self, node_unique_id, test_from):
+        name = test_from['name']
+        key = test_from['key']
+        if key not in self.tests:
+            self.tests[key] = {}
+        if name not in self.tests[key]:
+            self.tests[key][name] = []
+        self.tests[key][name].append(node_unique_id)
+
+    def remove_tests(self, yaml_key, name):
+        if yaml_key in self.tests:
+            if name in self.tests[yaml_key]:
+                del self.tests[yaml_key][name]
+
+    def get_tests(self, yaml_key, name):
+        if yaml_key in self.tests:
+            if name in self.tests[yaml_key]:
+                return self.tests[yaml_key][name]
+        return []
+
+    def get_key_and_name_for_test(self, test_unique_id):
+        yaml_key = None
+        block_name = None
+        for key in self.tests.keys():
+            for name in self.tests[key]:
+                for unique_id in self.tests[key][name]:
+                    if unique_id == test_unique_id:
+                        yaml_key = key
+                        block_name = name
+                        break
+        return (yaml_key, block_name)
+
+    def get_all_test_ids(self):
+        test_ids = []
+        for key in self.tests.keys():
+            for name in self.tests[key]:
+                test_ids.extend(self.tests[key][name])
+        return test_ids
+
+
+AnySourceFile = Union[SchemaSourceFile, SourceFile]

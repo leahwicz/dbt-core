@@ -43,6 +43,15 @@ DEBUG_LOG_FORMAT = (
     '{record.message}'
 )
 
+SECRET_ENV_PREFIX = 'DBT_ENV_SECRET_'
+
+
+def get_secret_env() -> List[str]:
+    return [
+        v for k, v in os.environ.items()
+        if k.startswith(SECRET_ENV_PREFIX)
+    ]
+
 
 ExceptionInformation = str
 
@@ -95,7 +104,8 @@ class JsonFormatter(LogMessageFormatter):
         # utils imports exceptions which imports logger...
         import dbt.utils
         log_message = super().__call__(record, handler)
-        return json.dumps(log_message.to_dict(), cls=dbt.utils.JSONEncoder)
+        dct = log_message.to_dict(omit_none=True)
+        return json.dumps(dct, cls=dbt.utils.JSONEncoder)
 
 
 class FormatterMixin:
@@ -127,6 +137,7 @@ class OutputHandler(logbook.StreamHandler, FormatterMixin):
     The `format_string` parameter only changes the default text output, not
       debug mode or json.
     """
+
     def __init__(
         self,
         stream,
@@ -220,7 +231,8 @@ class TimingProcessor(logbook.Processor):
 
     def process(self, record):
         if self.timing_info is not None:
-            record.extra['timing_info'] = self.timing_info.to_dict()
+            record.extra['timing_info'] = self.timing_info.to_dict(
+                omit_none=True)
 
 
 class DbtProcessState(logbook.Processor):
@@ -330,6 +342,12 @@ class TimestampNamed(logbook.Processor):
         record.extra[self.name] = datetime.utcnow().isoformat()
 
 
+class ScrubSecrets(logbook.Processor):
+    def process(self, record):
+        for secret in get_secret_env():
+            record.message = str(record.message).replace(secret, "*****")
+
+
 logger = logbook.Logger('dbt')
 # provide this for the cache, disabled by default
 CACHE_LOGGER = logbook.Logger('dbt.cache')
@@ -349,6 +367,7 @@ def make_log_dir_if_missing(log_dir):
 class DebugWarnings(logbook.compat.redirected_warnings):
     """Log warnings, except send them to 'debug' instead of 'warning' level.
     """
+
     def make_record(self, message, exception, filename, lineno):
         rv = super().make_record(message, exception, filename, lineno)
         rv.level = logbook.DEBUG
@@ -469,7 +488,8 @@ class LogManager(logbook.NestedSetup):
         self._file_handler = DelayedFileHandler()
         self._relevel_processor = Relevel(allowed=['dbt', 'werkzeug'])
         self._state_processor = DbtProcessState('internal')
-        # keep track of wheter we've already entered to decide if we should
+        self._scrub_processor = ScrubSecrets()
+        # keep track of whether we've already entered to decide if we should
         # be actually pushing. This allows us to log in main() and also
         # support entering dbt execution via handle_and_check.
         self._stack_depth = 0
@@ -479,6 +499,7 @@ class LogManager(logbook.NestedSetup):
             self._file_handler,
             self._relevel_processor,
             self._state_processor,
+            self._scrub_processor
         ])
 
     def push_application(self):

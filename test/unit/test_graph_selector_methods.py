@@ -7,12 +7,14 @@ from pathlib import Path
 from dbt.contracts.files import FileHash
 from dbt.contracts.graph.parsed import (
     DependsOn,
+    MacroDependsOn,
     NodeConfig,
+    ParsedMacro,
     ParsedModelNode,
     ParsedExposure,
     ParsedSeedNode,
-    ParsedDataTestNode,
-    ParsedSchemaTestNode,
+    ParsedSingularTestNode,
+    ParsedGenericTestNode,
     ParsedSourceDefinition,
     TestConfig,
     TestMetadata,
@@ -85,7 +87,7 @@ def make_model(pkg, name, sql, refs=None, sources=None, tags=None, path=None, al
         tags=tags,
         refs=ref_values,
         sources=source_values,
-        depends_on=DependsOn(nodes=depends_on_nodes),
+        depends_on=DependsOn(nodes=depends_on_nodes, macros=[]),
         resource_type=NodeType.Model,
         checksum=FileHash.from_contents(''),
     )
@@ -157,6 +159,27 @@ def make_source(pkg, source_name, table_name, path=None, loader=None, identifier
     )
 
 
+def make_macro(pkg, name, macro_sql, path=None, depends_on_macros=None):
+    if path is None:
+        path = 'macros/macros.sql'
+    
+    if depends_on_macros is None:
+        depends_on_macros = []
+    
+    return ParsedMacro(
+        name=name,
+        macro_sql=macro_sql,
+        unique_id=f'macro.{pkg}.{name}',
+        package_name=pkg,
+        root_path='/usr/dbt/some-project',
+        path=path,
+        original_file_path=path,
+        resource_type=NodeType.Macro,
+        tags=[],
+        depends_on=MacroDependsOn(macros=depends_on_macros),
+    )
+
+
 def make_unique_test(pkg, test_model, column_name, path=None, refs=None, sources=None, tags=None):
     return make_schema_test(pkg, 'unique', test_model, {}, column_name=column_name)
 
@@ -191,10 +214,10 @@ def make_schema_test(pkg, test_name, test_model, test_kwargs, path=None, refs=No
 
     if len(name_parts) == 2:
         namespace, test_name = name_parts
-        macro_depends = f'model.{namespace}.{test_name}'
+        macro_depends = f'macro.{namespace}.test_{test_name}'
     elif len(name_parts) == 1:
         namespace = None
-        macro_depends = f'model.dbt.{test_name}'
+        macro_depends = f'macro.dbt.test_{test_name}'
     else:
         assert False, f'invalid test name: {test_name}'
 
@@ -217,7 +240,7 @@ def make_schema_test(pkg, test_name, test_model, test_kwargs, path=None, refs=No
         source_values.append([source.source_name, source.name])
         depends_on_nodes.append(source.unique_id)
 
-    return ParsedSchemaTestNode(
+    return ParsedGenericTestNode(
         raw_sql=raw_sql,
         test_metadata=TestMetadata(
             namespace=namespace,
@@ -273,7 +296,7 @@ def make_data_test(pkg, name, sql, refs=None, sources=None, tags=None, path=None
         source_values.append([src.source_name, src.name])
         depends_on_nodes.append(src.unique_id)
 
-    return ParsedDataTestNode(
+    return ParsedSingularTestNode(
         raw_sql=sql,
         database='dbt',
         schema='dbt_schema',
@@ -289,7 +312,7 @@ def make_data_test(pkg, name, sql, refs=None, sources=None, tags=None, path=None
         tags=tags,
         refs=ref_values,
         sources=source_values,
-        depends_on=DependsOn(nodes=depends_on_nodes),
+        depends_on=DependsOn(nodes=depends_on_nodes, macros=[]),
         resource_type=NodeType.Test,
         checksum=FileHash.from_contents(''),
     )
@@ -316,6 +339,45 @@ def make_exposure(pkg, name, path=None, fqn_extras=None, owner=None):
         root_path='/usr/src/app',
         original_file_path=path,
         owner=owner,
+    )
+
+
+
+@pytest.fixture
+def macro_test_unique():
+    return make_macro(
+        'dbt',
+        'test_unique',
+        'blablabla',
+        depends_on_macros=['macro.dbt.default__test_unique']
+    )
+
+
+@pytest.fixture
+def macro_default_test_unique():
+    return make_macro(
+        'dbt',
+        'default__test_unique',
+        'blablabla'
+    )
+
+
+@pytest.fixture
+def macro_test_not_null():
+    return make_macro(
+        'dbt',
+        'test_not_null',
+        'blablabla',
+        depends_on_macros=['macro.dbt.default__test_not_null']
+    )
+
+
+@pytest.fixture
+def macro_default_test_not_null():
+    return make_macro(
+        'dbt',
+        'default__test_not_null',
+        'blabla'
     )
 
 
@@ -458,17 +520,54 @@ def ext_source_id_unique(ext_source):
 def view_test_nothing(view_model):
     return make_data_test('pkg', 'view_test_nothing', 'select * from {{ ref("view_model") }} limit 0', refs=[view_model])
 
+# Support dots as namespace separators
+@pytest.fixture
+def namespaced_seed():
+    return make_seed(
+        'pkg',
+        'mynamespace.seed'
+    )
 
 @pytest.fixture
-def manifest(seed, source, ephemeral_model, view_model, table_model, ext_source, ext_model, union_model, ext_source_2, ext_source_other, ext_source_other_2, table_id_unique, table_id_not_null, view_id_unique, ext_source_id_unique, view_test_nothing):
+def namespace_model(source):
+    return make_model(
+        'pkg',
+        'mynamespace.ephemeral_model',
+        'select * from {{ source("raw", "seed") }}',
+        config_kwargs={'materialized': 'ephemeral'},
+        sources=[source],
+    )
+
+@pytest.fixture
+def namespaced_union_model(seed, ext_source):
+    return make_model(
+        'pkg',
+        'mynamespace.union_model',
+        'select * from {{ ref("mynamespace.seed") }} union all select * from {{ ref("mynamespace.ephemeral_model") }}',
+        config_kwargs={'materialized': 'table'},
+        refs=[seed],
+        sources=[ext_source],
+        fqn_extras=['unions'],
+        path='subdirectory/union_model.sql',
+        tags=['unions'],
+    )
+
+
+@pytest.fixture
+def manifest(seed, source, ephemeral_model, view_model, table_model, ext_source, ext_model, union_model, ext_source_2, 
+    ext_source_other, ext_source_other_2, table_id_unique, table_id_not_null, view_id_unique, ext_source_id_unique, 
+    view_test_nothing, namespaced_seed, namespace_model, namespaced_union_model, macro_test_unique, macro_default_test_unique,
+    macro_test_not_null, macro_default_test_not_null):
     nodes = [seed, ephemeral_model, view_model, table_model, union_model, ext_model,
-             table_id_unique, table_id_not_null, view_id_unique, ext_source_id_unique, view_test_nothing]
+             table_id_unique, table_id_not_null, view_id_unique, ext_source_id_unique, view_test_nothing,
+             namespaced_seed, namespace_model, namespaced_union_model]
     sources = [source, ext_source, ext_source_2,
                ext_source_other, ext_source_other_2]
+    macros = [macro_test_unique, macro_default_test_unique, macro_test_not_null, macro_default_test_not_null]
     manifest = Manifest(
         nodes={n.unique_id: n for n in nodes},
         sources={s.unique_id: s for s in sources},
-        macros={},
+        macros={m.unique_id: m for m in macros},
         docs={},
         files={},
         exposures={},
@@ -492,11 +591,12 @@ def test_select_fqn(manifest):
     assert method.arguments == []
 
     assert search_manifest_using_method(
-        manifest, method, 'pkg.unions') == {'union_model'}
+        manifest, method, 'pkg.unions') == {'union_model', 'mynamespace.union_model'}
     assert not search_manifest_using_method(manifest, method, 'ext.unions')
     # sources don't show up, because selection pretends they have no FQN. Should it?
     assert search_manifest_using_method(manifest, method, 'pkg') == {
-        'union_model', 'table_model', 'view_model', 'ephemeral_model', 'seed'}
+        'union_model', 'table_model', 'view_model', 'ephemeral_model', 'seed',
+        'mynamespace.union_model', 'mynamespace.ephemeral_model', 'mynamespace.seed'}
     assert search_manifest_using_method(
         manifest, method, 'ext') == {'ext_model'}
 
@@ -573,7 +673,9 @@ def test_select_package(manifest):
     assert method.arguments == []
 
     assert search_manifest_using_method(manifest, method, 'pkg') == {'union_model', 'table_model', 'view_model', 'ephemeral_model',
-                                                                     'seed', 'raw.seed', 'unique_table_model_id', 'not_null_table_model_id', 'unique_view_model_id', 'view_test_nothing'}
+                                                                     'seed', 'raw.seed', 'unique_table_model_id', 'not_null_table_model_id', 'unique_view_model_id', 'view_test_nothing',
+                                                                     'mynamespace.seed', 'mynamespace.ephemeral_model', 'mynamespace.union_model',
+                                                                     }
     assert search_manifest_using_method(manifest, method, 'ext') == {
         'ext_model', 'ext_raw.ext_source', 'ext_raw.ext_source_2', 'raw.ext_source', 'raw.ext_source_2', 'unique_ext_raw_ext_source_id'}
 
@@ -589,7 +691,7 @@ def test_select_config_materialized(manifest):
     assert search_manifest_using_method(manifest, method, 'view') == {
         'view_model', 'ext_model'}
     assert search_manifest_using_method(manifest, method, 'table') == {
-        'table_model', 'union_model'}
+        'table_model', 'union_model', 'mynamespace.union_model'}
 
 
 def test_select_test_name(manifest):
@@ -610,6 +712,11 @@ def test_select_test_type(manifest):
     method = methods.get_method('test_type', [])
     assert isinstance(method, TestTypeSelectorMethod)
     assert method.arguments == []
+    assert search_manifest_using_method(manifest, method, 'generic') == {
+        'unique_table_model_id', 'not_null_table_model_id', 'unique_view_model_id', 'unique_ext_raw_ext_source_id'}
+    assert search_manifest_using_method(manifest, method, 'singular') == {
+        'view_test_nothing'}
+    # test backwards compatibility
     assert search_manifest_using_method(manifest, method, 'schema') == {
         'unique_table_model_id', 'not_null_table_model_id', 'unique_view_model_id', 'unique_ext_raw_ext_source_id'}
     assert search_manifest_using_method(manifest, method, 'data') == {
@@ -658,6 +765,11 @@ def test_select_state_no_change(manifest, previous_state):
     method = statemethod(manifest, previous_state)
     assert not search_manifest_using_method(manifest, method, 'modified')
     assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'modified.configs')
+    assert not search_manifest_using_method(manifest, method, 'modified.persisted_descriptions')
+    assert not search_manifest_using_method(manifest, method, 'modified.relation')
+    assert not search_manifest_using_method(manifest, method, 'modified.macros')
 
 
 def test_select_state_nothing(manifest, previous_state):
@@ -684,9 +796,19 @@ def test_select_state_added_model(manifest, previous_state):
 def test_select_state_changed_model_sql(manifest, previous_state, view_model):
     change_node(manifest, view_model.replace(raw_sql='select 1 as id'))
     method = statemethod(manifest, previous_state)
+    
+    # both of these
     assert search_manifest_using_method(
         manifest, method, 'modified') == {'view_model'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.body') == {'view_model'}
+    
+    # none of these
     assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'modified.configs')
+    assert not search_manifest_using_method(manifest, method, 'modified.persisted_descriptions')
+    assert not search_manifest_using_method(manifest, method, 'modified.relation')
+    assert not search_manifest_using_method(manifest, method, 'modified.macros')
 
 
 def test_select_state_changed_model_fqn(manifest, previous_state, view_model):
@@ -775,7 +897,11 @@ def test_select_state_changed_seed_relation_documented(manifest, previous_state,
     method = statemethod(manifest, previous_state)
     assert search_manifest_using_method(
         manifest, method, 'modified') == {'seed'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.configs') == {'seed'}
     assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'modified.body')
+    assert not search_manifest_using_method(manifest, method, 'modified.persisted_descriptions')
 
 
 def test_select_state_changed_seed_relation_documented_nodocs(manifest, previous_state, seed):
@@ -787,7 +913,10 @@ def test_select_state_changed_seed_relation_documented_nodocs(manifest, previous
     method = statemethod(manifest, previous_state)
     assert search_manifest_using_method(
         manifest, method, 'modified') == {'seed'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.persisted_descriptions') == {'seed'}
     assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'modified.configs')
 
 
 def test_select_state_changed_seed_relation_documented_withdocs(manifest, previous_state, seed):
@@ -799,6 +928,8 @@ def test_select_state_changed_seed_relation_documented_withdocs(manifest, previo
     method = statemethod(manifest, previous_state)
     assert search_manifest_using_method(
         manifest, method, 'modified') == {'seed'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.persisted_descriptions') == {'seed'}
     assert not search_manifest_using_method(manifest, method, 'new')
 
 
@@ -809,7 +940,10 @@ def test_select_state_changed_seed_columns_documented(manifest, previous_state, 
     method = statemethod(manifest, previous_state)
     assert search_manifest_using_method(
         manifest, method, 'modified') == {'seed'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.configs') == {'seed'}
     assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'modified.persisted_descriptions')
 
 
 def test_select_state_changed_seed_columns_documented_nodocs(manifest, previous_state, seed):
@@ -824,7 +958,10 @@ def test_select_state_changed_seed_columns_documented_nodocs(manifest, previous_
     method = statemethod(manifest, previous_state)
     assert search_manifest_using_method(
         manifest, method, 'modified') == {'seed'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.persisted_descriptions') == {'seed'}
     assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'modified.configs')
 
 
 def test_select_state_changed_seed_columns_documented_withdocs(manifest, previous_state, seed):
@@ -839,4 +976,16 @@ def test_select_state_changed_seed_columns_documented_withdocs(manifest, previou
     method = statemethod(manifest, previous_state)
     assert search_manifest_using_method(
         manifest, method, 'modified') == {'seed'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.persisted_descriptions') == {'seed'}
+    assert not search_manifest_using_method(manifest, method, 'new')
+    assert not search_manifest_using_method(manifest, method, 'modified.configs')
+    
+def test_select_state_changed_test_macro_sql(manifest, previous_state, macro_default_test_not_null):
+    manifest.macros[macro_default_test_not_null.unique_id] = macro_default_test_not_null.replace(macro_sql='lalala')
+    method = statemethod(manifest, previous_state)
+    assert search_manifest_using_method(
+        manifest, method, 'modified') == {'not_null_table_model_id'}
+    assert search_manifest_using_method(
+        manifest, method, 'modified.macros') == {'not_null_table_model_id'}
     assert not search_manifest_using_method(manifest, method, 'new')

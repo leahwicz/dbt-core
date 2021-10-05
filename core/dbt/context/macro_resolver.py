@@ -14,8 +14,12 @@ MacroNamespace = Dict[str, ParsedMacro]
 # so that higher precedence macros are found first.
 # This functionality is also provided by the MacroNamespace,
 # but the intention is to eventually replace that class.
-# This enables us to get the macor unique_id without
+# This enables us to get the macro unique_id without
 # processing every macro in the project.
+# Note: the root project macros override everything in the
+# dbt internal projects. External projects (dependencies) will
+# use their own macros first, then pull from the root project
+# followed by dbt internal projects.
 class MacroResolver:
     def __init__(
         self,
@@ -48,18 +52,29 @@ class MacroResolver:
                 self.internal_packages_namespace.update(
                     self.internal_packages[pkg])
 
+    # search order:
+    # local_namespace (package of particular node), not including
+    #    the internal packages or the root package
+    #    This means that within an extra package, it uses its own macros
+    # root package namespace
+    # non-internal packages (that aren't local or root)
+    # dbt internal packages
     def _build_macros_by_name(self):
         macros_by_name = {}
-        # search root package macros
-        for macro in self.root_package_macros.values():
+
+        # all internal packages (already in the right order)
+        for macro in self.internal_packages_namespace.values():
             macros_by_name[macro.name] = macro
-        # search miscellaneous non-internal packages
+
+        # non-internal packages
         for fnamespace in self.packages.values():
             for macro in fnamespace.values():
                 macros_by_name[macro.name] = macro
-        # search all internal packages
-        for macro in self.internal_packages_namespace.values():
+
+        # root package macros
+        for macro in self.root_package_macros.values():
             macros_by_name[macro.name] = macro
+
         self.macros_by_name = macros_by_name
 
     def _add_macro_to(
@@ -97,17 +112,25 @@ class MacroResolver:
         for macro in self.macros.values():
             self.add_macro(macro)
 
-    def get_macro_id(self, local_package, macro_name):
+    def get_macro(self, local_package, macro_name):
         local_package_macros = {}
         if (local_package not in self.internal_package_names and
                 local_package in self.packages):
             local_package_macros = self.packages[local_package]
         # First: search the local packages for this macro
         if macro_name in local_package_macros:
-            return local_package_macros[macro_name].unique_id
+            return local_package_macros[macro_name]
+        # Now look up in the standard search order
         if macro_name in self.macros_by_name:
-            return self.macros_by_name[macro_name].unique_id
+            return self.macros_by_name[macro_name]
         return None
+
+    def get_macro_id(self, local_package, macro_name):
+        macro = self.get_macro(local_package, macro_name)
+        if macro is None:
+            return None
+        else:
+            return macro.unique_id
 
 
 # Currently this is just used by test processing in the schema
@@ -122,16 +145,37 @@ class TestMacroNamespace:
     ):
         self.macro_resolver = macro_resolver
         self.ctx = ctx
-        self.node = node
+        self.node = node  # can be none
         self.thread_ctx = thread_ctx
-        local_namespace = {}
+        self.local_namespace = {}
+        self.project_namespace = {}
         if depends_on_macros:
-            for macro_unique_id in depends_on_macros:
-                macro = self.manifest.macros[macro_unique_id]
-                local_namespace[macro.name] = MacroGenerator(
-                    macro, self.ctx, self.node, self.thread_ctx,
-                )
-        self.local_namespace = local_namespace
+            dep_macros = []
+            self.recursively_get_depends_on_macros(depends_on_macros, dep_macros)
+            for macro_unique_id in dep_macros:
+                if macro_unique_id in self.macro_resolver.macros:
+                    # Split up the macro unique_id to get the project_name
+                    (_, project_name, macro_name) = macro_unique_id.split('.')
+                    # Save the plain macro_name in the local_namespace
+                    macro = self.macro_resolver.macros[macro_unique_id]
+                    macro_gen = MacroGenerator(
+                        macro, self.ctx, self.node, self.thread_ctx,
+                    )
+                    self.local_namespace[macro_name] = macro_gen
+                    # We also need the two part macro name
+                    if project_name not in self.project_namespace:
+                        self.project_namespace[project_name] = {}
+                    self.project_namespace[project_name][macro_name] = macro_gen
+
+    def recursively_get_depends_on_macros(self, depends_on_macros, dep_macros):
+        for macro_unique_id in depends_on_macros:
+            if macro_unique_id in dep_macros:
+                continue
+            dep_macros.append(macro_unique_id)
+            if macro_unique_id in self.macro_resolver.macros:
+                macro = self.macro_resolver.macros[macro_unique_id]
+                if macro.depends_on.macros:
+                    self.recursively_get_depends_on_macros(macro.depends_on.macros, dep_macros)
 
     def get_from_package(
         self, package_name: Optional[str], name: str
@@ -141,12 +185,14 @@ class TestMacroNamespace:
             macro = self.macro_resolver.macros_by_name.get(name)
         elif package_name == GLOBAL_PROJECT_NAME:
             macro = self.macro_resolver.internal_packages_namespace.get(name)
-        elif package_name in self.resolver.packages:
+        elif package_name in self.macro_resolver.packages:
             macro = self.macro_resolver.packages[package_name].get(name)
         else:
             raise_compiler_error(
                 f"Could not find package '{package_name}'"
             )
+        if not macro:
+            return None
         macro_func = MacroGenerator(
             macro, self.ctx, self.node, self.thread_ctx
         )

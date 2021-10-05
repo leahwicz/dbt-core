@@ -47,6 +47,7 @@ class ServerProcess(dbt.flags.MP_CONTEXT.Process):
             '--port', str(self.port),
             '--profiles-dir', profiles_dir
         ]
+        dbt.flags.PROFILES_DIR = profiles_dir
         if cli_vars:
             handle_and_check_args.extend(['--vars', cli_vars])
         if target is not None:
@@ -209,6 +210,9 @@ class Querier:
     def deps(self, request_id: int = 1):
         return self.request(method='deps', request_id=request_id)
 
+    def list(self, request_id: int = 1):
+        return self.request(method='list', request_id=request_id)
+
     def compile(
         self,
         models: Optional[Union[str, List[str]]] = None,
@@ -257,10 +261,10 @@ class Querier:
     def run_operation(
         self,
         macro: str,
-        args: Optional[Dict[str, Any]],
+        args: Optional[Dict[str, Any]] = None,
         request_id: int = 1,
     ):
-        params = {'macro': macro}
+        params: Dict[str, Any] = {'macro': macro}
         if args is not None:
             params['args'] = args
         return self.request(
@@ -274,7 +278,7 @@ class Querier:
         show: bool = None,
         threads: Optional[int] = None,
         request_id: int = 1,
-        state: Optional[bool] = None,
+        state: Optional[str] = None,
     ):
         params = {}
         if select is not None:
@@ -297,7 +301,7 @@ class Querier:
         exclude: Optional[Union[str, List[str]]] = None,
         threads: Optional[int] = None,
         request_id: int = 1,
-        state: Optional[bool] = None,
+        state: Optional[str] = None,
     ):
         params = {}
         if select is not None:
@@ -318,6 +322,7 @@ class Querier:
         threads: Optional[int] = None,
         request_id: int = 1,
     ):
+        """ Deprecated rpc command `snapshot-freshness` -> `source-freshness` """
         params = {}
         if select is not None:
             params['select'] = select
@@ -325,6 +330,27 @@ class Querier:
             params['threads'] = threads
         return self.request(
             method='snapshot-freshness', params=params, request_id=request_id
+        )
+
+    def source_freshness(
+        self,
+        select: Optional[Union[str, List[str]]] = None,
+        exclude: Optional[Union[str, List[str]]] = None,
+        threads: Optional[int] = None,
+        request_id: int = 1,
+        state: Optional[str] = None,
+    ):
+        params = {}
+        if select is not None:
+            params['select'] = select
+        if exclude is not None:
+            params['exclude'] = exclude
+        if threads is not None:
+            params['threads'] = threads
+        if state is not None:
+            params['state'] = state
+        return self.request(
+            method='source-freshness', params=params, request_id=request_id
         )
 
     def test(
@@ -336,7 +362,7 @@ class Querier:
         schema: bool = None,
         request_id: int = 1,
         defer: Optional[bool] = None,
-        state: Optional[bool] = None,
+        state: Optional[str] = None,
     ):
         params = {}
         if models is not None:
@@ -355,6 +381,33 @@ class Querier:
             params['state'] = state
         return self.request(
             method='test', params=params, request_id=request_id
+        )
+
+    def build(
+        self,
+        select: Optional[Union[str, List[str]]] = None,
+        exclude: Optional[Union[str, List[str]]] = None,
+        resource_types: Optional[Union[str, List[str]]] = None,
+        threads: Optional[int] = None,
+        request_id: int = 1,
+        defer: Optional[bool] = None,
+        state: Optional[str] = None,
+    ):
+        params = {}
+        if select is not None:
+            params['select'] = select
+        if exclude is not None:
+            params['exclude'] = exclude
+        if resource_types is not None:
+            params['resource_types'] = resource_types
+        if threads is not None:
+            params['threads'] = threads
+        if defer is not None:
+            params['defer'] = defer
+        if state is not None:
+            params['state'] = state
+        return self.request(
+            method='build', params=params, request_id=request_id
         )
 
     def docs_generate(self, compile: bool = None, request_id: int = 1):

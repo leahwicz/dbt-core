@@ -1,5 +1,4 @@
-
-from typing import Set, List, Optional
+from typing import Set, List, Optional, Tuple
 
 from .graph import Graph, UniqueId
 from .queue import GraphQueue
@@ -28,6 +27,36 @@ def alert_non_existence(raw_spec, nodes):
             f"The selection criterion '{str(raw_spec)}' does not match"
             f" any nodes"
         )
+
+
+def alert_unused_nodes(raw_spec, node_names):
+    summary_nodes_str = ("\n  - ").join(node_names[:3])
+    debug_nodes_str = ("\n  - ").join(node_names)
+    and_more_str = f"\n  - and {len(node_names) - 3} more" if len(node_names) > 4 else ""
+    summary_msg = (
+        f"\nSome tests were excluded because at least one parent is not selected. "
+        f"Use the --greedy flag to include them."
+        f"\n  - {summary_nodes_str}{and_more_str}"
+    )
+    logger.info(summary_msg)
+    if len(node_names) > 4:
+        debug_msg = (
+            f"Full list of tests that were excluded:"
+            f"\n  - {debug_nodes_str}"
+        )
+        logger.debug(debug_msg)
+
+
+def can_select_indirectly(node):
+    """If a node is not selected itself, but its parent(s) are, it may qualify
+    for indirect selection.
+    Today, only Test nodes can be indirectly selected. In the future,
+    other node types or invocation flags might qualify.
+    """
+    if node.resource_type == NodeType.Test:
+        return True
+    else:
+        return False
 
 
 class NodeSelector(MethodManager):
@@ -61,8 +90,8 @@ class NodeSelector(MethodManager):
 
     def get_nodes_from_criteria(
         self,
-        spec: SelectionCriteria,
-    ) -> Set[UniqueId]:
+        spec: SelectionCriteria
+    ) -> Tuple[Set[UniqueId], Set[UniqueId]]:
         """Get all nodes specified by the single selection criteria.
 
         - collect the directly included nodes
@@ -79,11 +108,14 @@ class NodeSelector(MethodManager):
                 f"The '{spec.method}' selector specified in {spec.raw} is "
                 f"invalid. Must be one of [{valid_selectors}]"
             )
-            return set()
+            return set(), set()
 
-        extras = self.collect_specified_neighbors(spec, collected)
-        result = self.expand_selection(collected | extras)
-        return result
+        neighbors = self.collect_specified_neighbors(spec, collected)
+        direct_nodes, indirect_nodes = self.expand_selection(
+            selected=(collected | neighbors),
+            greedy=spec.greedy
+        )
+        return direct_nodes, indirect_nodes
 
     def collect_specified_neighbors(
         self, spec: SelectionCriteria, selected: Set[UniqueId]
@@ -106,24 +138,46 @@ class NodeSelector(MethodManager):
             additional.update(self.graph.select_children(selected, depth))
         return additional
 
-    def select_nodes(self, spec: SelectionSpec) -> Set[UniqueId]:
-        """Select the nodes in the graph according to the spec.
-
-        If the spec is a composite spec (a union, difference, or intersection),
+    def select_nodes_recursively(self, spec: SelectionSpec) -> Tuple[Set[UniqueId], Set[UniqueId]]:
+        """If the spec is a composite spec (a union, difference, or intersection),
         recurse into its selections and combine them. If the spec is a concrete
         selection criteria, resolve that using the given graph.
         """
         if isinstance(spec, SelectionCriteria):
-            result = self.get_nodes_from_criteria(spec)
+            direct_nodes, indirect_nodes = self.get_nodes_from_criteria(spec)
         else:
-            node_selections = [
-                self.select_nodes(component)
+            bundles = [
+                self.select_nodes_recursively(component)
                 for component in spec
             ]
-            result = spec.combined(node_selections)
+
+            direct_sets = []
+            indirect_sets = []
+
+            for direct, indirect in bundles:
+                direct_sets.append(direct)
+                indirect_sets.append(direct | indirect)
+
+            initial_direct = spec.combined(direct_sets)
+            indirect_nodes = spec.combined(indirect_sets)
+
+            direct_nodes = self.incorporate_indirect_nodes(initial_direct, indirect_nodes)
+
             if spec.expect_exists:
-                alert_non_existence(spec.raw, result)
-        return result
+                alert_non_existence(spec.raw, direct_nodes)
+
+        return direct_nodes, indirect_nodes
+
+    def select_nodes(self, spec: SelectionSpec) -> Tuple[Set[UniqueId], Set[UniqueId]]:
+        """Select the nodes in the graph according to the spec.
+
+        This is the main point of entry for turning a spec into a set of nodes:
+        - Recurse through spec, select by criteria, combine by set operation
+        - Return final (unfiltered) selection set
+        """
+        direct_nodes, indirect_nodes = self.select_nodes_recursively(spec)
+        indirect_only = indirect_nodes.difference(direct_nodes)
+        return direct_nodes, indirect_only
 
     def _is_graph_member(self, unique_id: UniqueId) -> bool:
         if unique_id in self.manifest.sources:
@@ -162,24 +216,78 @@ class NodeSelector(MethodManager):
             unique_id for unique_id in selected if self._is_match(unique_id)
         }
 
-    def expand_selection(self, selected: Set[UniqueId]) -> Set[UniqueId]:
-        """Perform selector-specific expansion."""
+    def expand_selection(
+        self, selected: Set[UniqueId], greedy: bool = False
+    ) -> Tuple[Set[UniqueId], Set[UniqueId]]:
+        # Test selection can expand to include an implicitly/indirectly selected test.
+        # In this way, `dbt test -m model_a` also includes tests that directly depend on `model_a`.
+        # Expansion has two modes, GREEDY and NOT GREEDY.
+        #
+        # GREEDY mode: If ANY parent is selected, select the test. We use this for EXCLUSION.
+        #
+        # NOT GREEDY mode:
+        #  - If ALL parents are selected, select the test.
+        #  - If ANY parent is missing, return it separately. We'll keep it around
+        #    for later and see if its other parents show up.
+        # We use this for INCLUSION.
+        # Users can also opt in to inclusive GREEDY mode by passing --greedy flag,
+        # or by specifying `greedy: true` in a yaml selector
+
+        direct_nodes = set(selected)
+        indirect_nodes = set()
+
+        for unique_id in self.graph.select_successors(selected):
+            if unique_id in self.manifest.nodes:
+                node = self.manifest.nodes[unique_id]
+                if can_select_indirectly(node):
+                    # should we add it in directly?
+                    if greedy or set(node.depends_on.nodes) <= set(selected):
+                        direct_nodes.add(unique_id)
+                    # if not:
+                    else:
+                        indirect_nodes.add(unique_id)
+
+        return direct_nodes, indirect_nodes
+
+    def incorporate_indirect_nodes(
+        self, direct_nodes: Set[UniqueId], indirect_nodes: Set[UniqueId] = set()
+    ) -> Set[UniqueId]:
+        # Check tests previously selected indirectly to see if ALL their
+        # parents are now present.
+
+        selected = set(direct_nodes)
+
+        for unique_id in indirect_nodes:
+            if unique_id in self.manifest.nodes:
+                node = self.manifest.nodes[unique_id]
+                if set(node.depends_on.nodes) <= set(selected):
+                    selected.add(unique_id)
+
         return selected
 
     def get_selected(self, spec: SelectionSpec) -> Set[UniqueId]:
-        """get_selected runs trhough the node selection process:
+        """get_selected runs through the node selection process:
 
             - node selection. Based on the include/exclude sets, the set
                 of matched unique IDs is returned
-                - expand the graph at each leaf node, before combination
-                    - selectors might override this. for example, this is where
-                        tests are added
+                - includes direct + indirect selection (for tests)
             - filtering:
                 - selectors can filter the nodes after all of them have been
                   selected
         """
-        selected_nodes = self.select_nodes(spec)
+        selected_nodes, indirect_only = self.select_nodes(spec)
         filtered_nodes = self.filter_selection(selected_nodes)
+
+        if indirect_only:
+            filtered_unused_nodes = self.filter_selection(indirect_only)
+            if filtered_unused_nodes and spec.greedy_warning:
+                # log anything that didn't make the cut
+                unused_node_names = []
+                for unique_id in filtered_unused_nodes:
+                    name = self.manifest.nodes[unique_id].name
+                    unused_node_names.append(name)
+                alert_unused_nodes(spec, unused_node_names)
+
         return filtered_nodes
 
     def get_graph_queue(self, spec: SelectionSpec) -> GraphQueue:

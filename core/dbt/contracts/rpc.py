@@ -38,8 +38,8 @@ class RPCParameters(dbtClassMixin):
     timeout: Optional[float]
 
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
-        data = super().__pre_deserialize__(data, options=options)
+    def __pre_deserialize__(cls, data, omit_none=True):
+        data = super().__pre_deserialize__(data)
         if 'timeout' not in data:
             data['timeout'] = None
         if 'task_tags' not in data:
@@ -58,15 +58,28 @@ class RPCExecParameters(RPCParameters):
 class RPCCompileParameters(RPCParameters):
     threads: Optional[int] = None
     models: Union[None, str, List[str]] = None
+    select: Union[None, str, List[str]] = None
     exclude: Union[None, str, List[str]] = None
     selector: Optional[str] = None
     state: Optional[str] = None
 
 
 @dataclass
+class RPCListParameters(RPCParameters):
+    resource_types: Optional[List[str]] = None
+    models: Union[None, str, List[str]] = None
+    exclude: Union[None, str, List[str]] = None
+    select: Union[None, str, List[str]] = None
+    selector: Optional[str] = None
+    output: Optional[str] = 'json'
+    output_keys: Optional[List[str]] = None
+
+
+@dataclass
 class RPCRunParameters(RPCParameters):
     threads: Optional[int] = None
     models: Union[None, str, List[str]] = None
+    select: Union[None, str, List[str]] = None
     exclude: Union[None, str, List[str]] = None
     selector: Optional[str] = None
     state: Optional[str] = None
@@ -104,6 +117,17 @@ class RPCSeedParameters(RPCParameters):
 class RPCDocsGenerateParameters(RPCParameters):
     compile: bool = True
     state: Optional[str] = None
+
+
+@dataclass
+class RPCBuildParameters(RPCParameters):
+    resource_types: Optional[List[str]] = None
+    select: Union[None, str, List[str]] = None
+    threads: Optional[int] = None
+    exclude: Union[None, str, List[str]] = None
+    selector: Optional[str] = None
+    state: Optional[str] = None
+    defer: Optional[bool] = None
 
 
 @dataclass
@@ -176,6 +200,8 @@ class RPCRunOperationParameters(RPCParameters):
 class RPCSourceFreshnessParameters(RPCParameters):
     threads: Optional[int] = None
     select: Union[None, str, List[str]] = None
+    exclude: Union[None, str, List[str]] = None
+    selector: Optional[str] = None
 
 
 @dataclass
@@ -188,6 +214,13 @@ class GetManifestParameters(RPCParameters):
 @dataclass
 class RemoteResult(VersionedSchema):
     logs: List[LogMessage]
+
+
+@dataclass
+@schema_version('remote-list-results', 1)
+class RemoteListResults(RemoteResult):
+    output: List[Any]
+    generated_at: datetime = field(default_factory=datetime.utcnow)
 
 
 @dataclass
@@ -428,8 +461,8 @@ class TaskTiming(dbtClassMixin):
     # These ought to be defaults but superclass order doesn't
     # allow that to work
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
-        data = super().__pre_deserialize__(data, options=options)
+    def __pre_deserialize__(cls, data):
+        data = super().__pre_deserialize__(data)
         for field_name in ('start', 'end', 'elapsed'):
             if field_name not in data:
                 data[field_name] = None
@@ -496,8 +529,8 @@ class PollResult(RemoteResult, TaskTiming):
     # These ought to be defaults but superclass order doesn't
     # allow that to work
     @classmethod
-    def __pre_deserialize__(cls, data, options=None):
-        data = super().__pre_deserialize__(data, options=options)
+    def __pre_deserialize__(cls, data):
+        data = super().__pre_deserialize__(data)
         for field_name in ('start', 'end', 'elapsed'):
             if field_name not in data:
                 data[field_name] = None

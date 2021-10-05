@@ -1,4 +1,5 @@
 import errno
+import functools
 import fnmatch
 import json
 import os
@@ -15,9 +16,8 @@ from typing import (
 )
 
 import dbt.exceptions
-import dbt.utils
-
 from dbt.logger import GLOBAL_LOGGER as logger
+from dbt.utils import _connection_exception_retry as connection_exception_retry
 
 if sys.platform == 'win32':
     from ctypes import WinDLL, c_bool
@@ -30,7 +30,7 @@ def find_matching(
     root_path: str,
     relative_paths_to_search: List[str],
     file_pattern: str,
-) -> List[Dict[str, str]]:
+) -> List[Dict[str, Any]]:
     """
     Given an absolute `root_path`, a list of relative paths to that
     absolute root path (`relative_paths_to_search`), and a `file_pattern`
@@ -61,11 +61,19 @@ def find_matching(
                 relative_path = os.path.relpath(
                     absolute_path, absolute_path_to_search
                 )
+                modification_time = 0.0
+                try:
+                    modification_time = os.path.getmtime(absolute_path)
+                except OSError:
+                    logger.exception(
+                        f"Error retrieving modification time for file {absolute_path}"
+                    )
                 if reobj.match(local_file):
                     matching.append({
                         'searched_path': relative_path_to_search,
                         'absolute_path': absolute_path,
                         'relative_path': relative_path,
+                        'modification_time': modification_time,
                     })
 
     return matching
@@ -416,6 +424,9 @@ def run_cmd(
         full_env.update(env)
 
     try:
+        exe_pth = shutil.which(cmd[0])
+        if exe_pth:
+            cmd = [os.path.abspath(exe_pth)] + list(cmd[1:])
         proc = subprocess.Popen(
             cmd,
             cwd=cwd,
@@ -436,6 +447,13 @@ def run_cmd(
                                                 out, err)
 
     return out, err
+
+
+def download_with_retries(
+    url: str, path: str, timeout: Optional[Union[float, tuple]] = None
+) -> None:
+    download_fn = functools.partial(download, url, path, timeout)
+    connection_exception_retry(download_fn, 5)
 
 
 def download(

@@ -20,7 +20,15 @@ from dbt.contracts.graph.parsed import (
     NodeConfig,
     ParsedSeedNode,
     ParsedSourceDefinition,
+    ParsedExposure,
 )
+
+from dbt.contracts.graph.unparsed import (
+    ExposureType,
+    ExposureOwner,
+    MaturityType
+)
+
 from dbt.contracts.graph.compiled import CompiledModelNode
 from dbt.node_types import NodeType
 import freezegun
@@ -32,8 +40,8 @@ REQUIRED_PARSED_NODE_KEYS = frozenset({
     'alias', 'tags', 'config', 'unique_id', 'refs', 'sources', 'meta',
     'depends_on', 'database', 'schema', 'name', 'resource_type',
     'package_name', 'root_path', 'path', 'original_file_path', 'raw_sql',
-    'description', 'columns', 'fqn', 'build_path', 'patch_path', 'docs',
-    'deferred', 'checksum', 'unrendered_config',
+    'description', 'columns', 'fqn', 'build_path', 'compiled_path', 'patch_path', 'docs',
+    'deferred', 'checksum', 'unrendered_config', 'created_at',
 })
 
 REQUIRED_COMPILED_NODE_KEYS = frozenset(REQUIRED_PARSED_NODE_KEYS | {
@@ -47,7 +55,8 @@ ENV_KEY_NAME = 'KEY' if os.name == 'nt' else 'key'
 
 class ManifestTest(unittest.TestCase):
     def setUp(self):
-        dbt.flags.STRICT_MODE = True
+        # TODO: why is this needed for tests in this module to pass?
+        tracking.active_user = None
 
         self.maxDiff = None
 
@@ -62,6 +71,27 @@ class ManifestTest(unittest.TestCase):
             'column_types': {},
             'tags': [],
         })
+
+        self.exposures = {
+            'exposure.root.my_exposure': ParsedExposure(
+                name='my_exposure',
+                type=ExposureType.Dashboard,
+                owner=ExposureOwner(email='some@email.com'),
+                resource_type=NodeType.Exposure,
+                description='Test description',
+                maturity=MaturityType.High,
+                url='hhtp://mydashboard.com',
+                depends_on=DependsOn(nodes=['model.root.multi']),
+                refs=[['multi']],
+                sources=[],
+                fqn=['root', 'my_exposure'],
+                unique_id='exposure.root.my_exposure',
+                package_name='root',
+                root_path='',
+                path='my_exposure.sql',
+                original_file_path='my_exposure.sql'
+            )
+        }
 
         self.nested_nodes = {
             'model.snowplow.events': ParsedModelNode(
@@ -211,10 +241,12 @@ class ManifestTest(unittest.TestCase):
                 original_file_path='schema.yml',
             ),
         }
+        for exposure in self.exposures.values():
+            exposure.validate(exposure.to_dict(omit_none=True))
         for node in self.nested_nodes.values():
-            node.validate(node.to_dict())
+            node.validate(node.to_dict(omit_none=True))
         for source in self.sources.values():
-            source.validate(source.to_dict())
+            source.validate(source.to_dict(omit_none=True))
 
         os.environ['DBT_ENV_CUSTOM_ENV_key'] = 'value'
 
@@ -224,12 +256,12 @@ class ManifestTest(unittest.TestCase):
     @freezegun.freeze_time('2018-02-14T09:15:13Z')
     def test__no_nodes(self):
         manifest = Manifest(
-            nodes={}, sources={}, macros={}, docs={}, disabled=[], files={},
+            nodes={}, sources={}, macros={}, docs={}, disabled={}, files={},
             exposures={}, selectors={},
             metadata=ManifestMetadata(generated_at=datetime.utcnow()),
         )
         self.assertEqual(
-            manifest.writable_manifest().to_dict(),
+            manifest.writable_manifest().to_dict(omit_none=True),
             {
                 'nodes': {},
                 'sources': {},
@@ -240,13 +272,13 @@ class ManifestTest(unittest.TestCase):
                 'child_map': {},
                 'metadata': {
                     'generated_at': '2018-02-14T09:15:13Z',
-                    'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v1.json',
+                    'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v3.json',
                     'dbt_version': dbt.version.__version__,
                     'env': {ENV_KEY_NAME: 'value'},
                     # invocation_id is None, so it will not be present
                 },
                 'docs': {},
-                'disabled': [],
+                'disabled': {},
             }
         )
 
@@ -254,14 +286,14 @@ class ManifestTest(unittest.TestCase):
     def test__nested_nodes(self):
         nodes = copy.copy(self.nested_nodes)
         manifest = Manifest(
-            nodes=nodes, sources={}, macros={}, docs={}, disabled=[], files={},
+            nodes=nodes, sources={}, macros={}, docs={}, disabled={}, files={},
             exposures={}, selectors={},
             metadata=ManifestMetadata(generated_at=datetime.utcnow()),
         )
-        serialized = manifest.writable_manifest().to_dict()
+        serialized = manifest.writable_manifest().to_dict(omit_none=True)
         self.assertEqual(serialized['metadata']['generated_at'], '2018-02-14T09:15:13Z')
         self.assertEqual(serialized['docs'], {})
-        self.assertEqual(serialized['disabled'], [])
+        self.assertEqual(serialized['disabled'], {})
         parent_map = serialized['parent_map']
         child_map = serialized['child_map']
         # make sure there aren't any extra/missing keys.
@@ -319,15 +351,18 @@ class ManifestTest(unittest.TestCase):
         )
 
     def test__build_flat_graph(self):
+        exposures = copy.copy(self.exposures)
         nodes = copy.copy(self.nested_nodes)
         sources = copy.copy(self.sources)
         manifest = Manifest(nodes=nodes, sources=sources, macros={}, docs={},
-                            disabled=[], files={}, exposures={}, selectors={})
+                            disabled={}, files={}, exposures=exposures, selectors={})
         manifest.build_flat_graph()
         flat_graph = manifest.flat_graph
+        flat_exposures = flat_graph['exposures']
         flat_nodes = flat_graph['nodes']
         flat_sources = flat_graph['sources']
-        self.assertEqual(set(flat_graph), set(['nodes', 'sources']))
+        self.assertEqual(set(flat_graph), set(['exposures', 'nodes', 'sources']))
+        self.assertEqual(set(flat_exposures), set(self.exposures))
         self.assertEqual(set(flat_nodes), set(self.nested_nodes))
         self.assertEqual(set(flat_sources), set(self.sources))
         for node in flat_nodes.values():
@@ -337,7 +372,7 @@ class ManifestTest(unittest.TestCase):
     def test_metadata(self, mock_user):
         mock_user.id = 'cfc9500f-dc7f-4c83-9ea7-2c581c1b38cf'
         mock_user.invocation_id = '01234567-0123-0123-0123-0123456789ab'
-        mock_user.do_not_track = True
+        dbt.flags.SEND_ANONYMOUS_USAGE_STATS = False
         now = datetime.utcnow()
         self.assertEqual(
             ManifestMetadata(
@@ -360,18 +395,18 @@ class ManifestTest(unittest.TestCase):
     def test_no_nodes_with_metadata(self, mock_user):
         mock_user.id = 'cfc9500f-dc7f-4c83-9ea7-2c581c1b38cf'
         mock_user.invocation_id = '01234567-0123-0123-0123-0123456789ab'
-        mock_user.do_not_track = True
+        dbt.flags.SEND_ANONYMOUS_USAGE_STATS = False
         metadata = ManifestMetadata(
             project_id='098f6bcd4621d373cade4e832627b4f6',
             adapter_type='postgres',
             generated_at=datetime.utcnow(),
         )
         manifest = Manifest(nodes={}, sources={}, macros={}, docs={},
-                            disabled=[], selectors={},
+                            disabled={}, selectors={},
                             metadata=metadata, files={}, exposures={})
 
         self.assertEqual(
-            manifest.writable_manifest().to_dict(),
+            manifest.writable_manifest().to_dict(omit_none=True),
             {
                 'nodes': {},
                 'sources': {},
@@ -383,7 +418,7 @@ class ManifestTest(unittest.TestCase):
                 'docs': {},
                 'metadata': {
                     'generated_at': '2018-02-14T09:15:13Z',
-                    'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v1.json',
+                    'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v3.json',
                     'dbt_version': dbt.version.__version__,
                     'project_id': '098f6bcd4621d373cade4e832627b4f6',
                     'user_id': 'cfc9500f-dc7f-4c83-9ea7-2c581c1b38cf',
@@ -392,13 +427,13 @@ class ManifestTest(unittest.TestCase):
                     'invocation_id': '01234567-0123-0123-0123-0123456789ab',
                     'env': {ENV_KEY_NAME: 'value'},
                 },
-                'disabled': [],
+                'disabled': {},
             }
         )
 
     def test_get_resource_fqns_empty(self):
         manifest = Manifest(nodes={}, sources={}, macros={}, docs={},
-                            disabled=[], files={}, exposures={}, selectors={})
+                            disabled={}, files={}, exposures={}, selectors={})
         self.assertEqual(manifest.get_resource_fqns(), {})
 
     def test_get_resource_fqns(self):
@@ -424,8 +459,11 @@ class ManifestTest(unittest.TestCase):
             checksum=FileHash.empty(),
         )
         manifest = Manifest(nodes=nodes, sources=self.sources, macros={}, docs={},
-                            disabled=[], files={}, exposures={}, selectors={})
+                            disabled={}, files={}, exposures=self.exposures, selectors={})
         expect = {
+            'exposures': frozenset([
+                ('root', 'my_exposure')
+            ]),
             'models': frozenset([
                 ('snowplow', 'events'),
                 ('root', 'events'),
@@ -447,8 +485,6 @@ class ManifestTest(unittest.TestCase):
 
 class MixedManifestTest(unittest.TestCase):
     def setUp(self):
-        dbt.flags.STRICT_MODE = True
-
         self.maxDiff = None
 
         self.model_config = NodeConfig.from_dict({
@@ -610,9 +646,9 @@ class MixedManifestTest(unittest.TestCase):
     def test__no_nodes(self):
         metadata = ManifestMetadata(generated_at=datetime.utcnow(), invocation_id='01234567-0123-0123-0123-0123456789ab')
         manifest = Manifest(nodes={}, sources={}, macros={}, docs={}, selectors={},
-                            disabled=[], metadata=metadata, files={}, exposures={})
+                            disabled={}, metadata=metadata, files={}, exposures={})
         self.assertEqual(
-            manifest.writable_manifest().to_dict(),
+            manifest.writable_manifest().to_dict(omit_none=True),
             {
                 'nodes': {},
                 'macros': {},
@@ -623,13 +659,13 @@ class MixedManifestTest(unittest.TestCase):
                 'child_map': {},
                 'metadata': {
                     'generated_at': '2018-02-14T09:15:13Z',
-                    'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v1.json',
+                    'dbt_schema_version': 'https://schemas.getdbt.com/dbt/manifest/v3.json',
                     'dbt_version': dbt.version.__version__,
                     'invocation_id': '01234567-0123-0123-0123-0123456789ab',
                     'env': {ENV_KEY_NAME: 'value'},
                 },
                 'docs': {},
-                'disabled': [],
+                'disabled': {},
             }
         )
 
@@ -637,12 +673,12 @@ class MixedManifestTest(unittest.TestCase):
     def test__nested_nodes(self):
         nodes = copy.copy(self.nested_nodes)
         manifest = Manifest(nodes=nodes, sources={}, macros={}, docs={},
-                            disabled=[], selectors={},
+                            disabled={}, selectors={},
                             metadata=ManifestMetadata(generated_at=datetime.utcnow()),
                             files={}, exposures={})
-        serialized = manifest.writable_manifest().to_dict()
+        serialized = manifest.writable_manifest().to_dict(omit_none=True)
         self.assertEqual(serialized['metadata']['generated_at'], '2018-02-14T09:15:13Z')
-        self.assertEqual(serialized['disabled'], [])
+        self.assertEqual(serialized['disabled'], {})
         parent_map = serialized['parent_map']
         child_map = serialized['child_map']
         # make sure there aren't any extra/missing keys.
@@ -702,12 +738,12 @@ class MixedManifestTest(unittest.TestCase):
     def test__build_flat_graph(self):
         nodes = copy.copy(self.nested_nodes)
         manifest = Manifest(nodes=nodes, sources={}, macros={}, docs={},
-                            disabled=[], selectors={},
+                            disabled={}, selectors={},
                             files={}, exposures={})
         manifest.build_flat_graph()
         flat_graph = manifest.flat_graph
         flat_nodes = flat_graph['nodes']
-        self.assertEqual(set(flat_graph), set(['nodes', 'sources']))
+        self.assertEqual(set(flat_graph), set(['exposures', 'nodes', 'sources']))
         self.assertEqual(set(flat_nodes), set(self.nested_nodes))
         compiled_count = 0
         for node in flat_nodes.values():
@@ -723,7 +759,7 @@ class MixedManifestTest(unittest.TestCase):
 
 class TestManifestSearch(unittest.TestCase):
     _macros = []
-    _models = []
+    _nodes = []
     _docs = []
 
     @property
@@ -749,7 +785,7 @@ class TestManifestSearch(unittest.TestCase):
             docs={
                 d.unique_id: d for d in self.docs
             },
-            disabled=[],
+            disabled={},
             files={},
             exposures={},
             selectors={},
@@ -770,7 +806,7 @@ def make_manifest(nodes=[], sources=[], macros=[], docs=[]):
         docs={
             d.unique_id: d for d in docs
         },
-        disabled=[],
+        disabled={},
         files={},
         exposures={},
         selectors={},

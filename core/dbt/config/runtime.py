@@ -12,6 +12,7 @@ from .profile import Profile
 from .project import Project
 from .renderer import DbtProjectYamlRenderer, ProfileRenderer
 from .utils import parse_cli_vars
+from dbt import flags
 from dbt import tracking
 from dbt.adapters.factory import get_relation_class_by_name, get_include_paths
 from dbt.helper_types import FQNPath, PathSet
@@ -78,7 +79,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
             get_relation_class_by_name(profile.credentials.type)
             .get_default_quote_policy()
             .replace_dict(_project_quoting_dict(project, profile))
-        ).to_dict()
+        ).to_dict(omit_none=True)
 
         cli_vars: Dict[str, Any] = parse_cli_vars(getattr(args, 'vars', '{}'))
 
@@ -102,6 +103,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
             models=project.models,
             on_run_start=project.on_run_start,
             on_run_end=project.on_run_end,
+            dispatch=project.dispatch,
             seeds=project.seeds,
             snapshots=project.snapshots,
             dbt_version=project.dbt_version,
@@ -110,12 +112,13 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
             selectors=project.selectors,
             query_comment=project.query_comment,
             sources=project.sources,
+            tests=project.tests,
             vars=project.vars,
             config_version=project.config_version,
             unrendered=project.unrendered,
             profile_name=profile.profile_name,
             target_name=profile.target_name,
-            config=profile.config,
+            user_config=profile.user_config,
             threads=profile.threads,
             credentials=profile.credentials,
             args=args,
@@ -142,7 +145,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
         project = Project.from_project_root(
             project_root,
             renderer,
-            verify_version=getattr(self.args, 'version_check', False),
+            verify_version=bool(flags.VERSION_CHECK),
         )
 
         cfg = self.from_parts(
@@ -195,7 +198,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
     ) -> Tuple[Project, Profile]:
         # profile_name from the project
         project_root = args.project_dir if args.project_dir else os.getcwd()
-        version_check = getattr(args, 'version_check', False)
+        version_check = bool(flags.VERSION_CHECK)
         partial = Project.partial_load(
             project_root,
             verify_version=version_check
@@ -272,7 +275,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
         return frozenset(paths)
 
     def get_resource_config_paths(self) -> Dict[str, PathSet]:
-        """Return a dictionary with 'seeds' and 'models' keys whose values are
+        """Return a dictionary with resource type keys whose values are
         lists of lists of strings, where each inner list of strings represents
         a configured path in the resource.
         """
@@ -281,6 +284,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
             'seeds': self._get_config_paths(self.seeds),
             'snapshots': self._get_config_paths(self.snapshots),
             'sources': self._get_config_paths(self.sources),
+            'tests': self._get_config_paths(self.tests),
         }
 
     def get_unused_resource_config_paths(
@@ -326,6 +330,17 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
         if self.dependencies is None:
             all_projects = {self.project_name: self}
             internal_packages = get_include_paths(self.credentials.type)
+            # raise exception if fewer installed packages than in packages.yml
+            count_packages_specified = len(self.packages.packages)  # type: ignore
+            count_packages_installed = len(tuple(self._get_project_directories()))
+            if count_packages_specified > count_packages_installed:
+                raise_compiler_error(
+                    f'dbt found {count_packages_specified} package(s) '
+                    f'specified in packages.yml, but only '
+                    f'{count_packages_installed} package(s) installed '
+                    f'in {self.modules_path}. Run "dbt deps" to '
+                    f'install package dependencies.'
+                )
             project_paths = itertools.chain(
                 internal_packages,
                 self._get_project_directories()
@@ -377,6 +392,10 @@ class UnsetCredentials(Credentials):
     def type(self):
         return None
 
+    @property
+    def unique_field(self):
+        return None
+
     def connection_info(self, *args, **kwargs):
         return {}
 
@@ -391,14 +410,14 @@ class UnsetConfig(UserConfig):
                 f"'UnsetConfig' object has no attribute {name}"
             )
 
-    def __post_serialize__(self, dct, options=None):
+    def __post_serialize__(self, dct):
         return {}
 
 
 class UnsetProfile(Profile):
     def __init__(self):
         self.credentials = UnsetCredentials()
-        self.config = UnsetConfig()
+        self.user_config = UnsetConfig()
         self.profile_name = ''
         self.target_name = ''
         self.threads = -1
@@ -480,6 +499,7 @@ class UnsetProfileConfig(RuntimeConfig):
             models=project.models,
             on_run_start=project.on_run_start,
             on_run_end=project.on_run_end,
+            dispatch=project.dispatch,
             seeds=project.seeds,
             snapshots=project.snapshots,
             dbt_version=project.dbt_version,
@@ -488,12 +508,13 @@ class UnsetProfileConfig(RuntimeConfig):
             selectors=project.selectors,
             query_comment=project.query_comment,
             sources=project.sources,
+            tests=project.tests,
             vars=project.vars,
             config_version=project.config_version,
             unrendered=project.unrendered,
             profile_name='',
             target_name='',
-            config=UnsetConfig(),
+            user_config=UnsetConfig(),
             threads=getattr(args, 'threads', 1),
             credentials=UnsetCredentials(),
             args=args,
