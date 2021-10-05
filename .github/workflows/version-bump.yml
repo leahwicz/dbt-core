@@ -36,8 +36,7 @@ jobs:
         run: |
           git checkout -b bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
           git push origin bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
-          git set-upstream
-          git push
+          git pull --set-upstream-to=origin/bumping-version/${{env.version_number}}_$GITHUB_RUN_ID bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
       
       - name: Generate Docker requirements
         run: |
