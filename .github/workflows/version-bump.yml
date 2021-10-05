@@ -13,8 +13,7 @@ on:
 env:
   version_number: '0.21.6'
   is_dry_run: true
-  commit_branch: $GITHUB_REF
-  
+ 
 jobs:
   bump:
     runs-on: ubuntu-latest
@@ -36,8 +35,7 @@ jobs:
         if: ${{ env.is_dry_run }}
         run: |
           git checkout -b bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
-          echo bumping-version/${{env.version_number}}_$GITHUB_RUN_ID >> ${{env.commit_branch}}
-          
+      
       - name: Generate Docker requirements
         run: |
           source env/bin/activate
@@ -52,11 +50,19 @@ jobs:
           env/bin/bumpversion --allow-dirty --new-version ${{env.version_number}} major
           git status
 
-      - name: Commit version bump 
+      - name: Commit version bump directly
         uses: EndBug/add-and-commit@v7
+        if: ${{ !env.is_dry_run }}
         with:
           author_name: 'Github Build Bot'
           author_email: 'buildbot@fishtownanalytics.com'
           message: 'Bumping version to ${{env.version_number}}'
-          branch: '${{env.commit_branch}}'
-        
+
+      - name: Commit version bump to branch
+        uses: EndBug/add-and-commit@v7
+        if: ${{ env.is_dry_run }}
+        with:
+          author_name: 'Github Build Bot'
+          author_email: 'buildbot@fishtownanalytics.com'
+          message: 'Bumping version to ${{env.version_number}}'
+          branch: 'bumping-version/${{env.version_number}}_$GITHUB_RUN_ID'
