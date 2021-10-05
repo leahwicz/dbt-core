@@ -35,6 +35,7 @@ jobs:
         if: ${{ env.is_dry_run }}
         run: |
           git checkout -b bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
+          git push origin bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
       
       - name: Generate Docker requirements
         run: |
