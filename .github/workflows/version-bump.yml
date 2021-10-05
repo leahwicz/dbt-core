@@ -42,6 +42,6 @@ jobs:
         run: |
           source env/bin/activate
           pip install -r dev-requirements.txt 
-          env/bin/bumpversion --new-version --allow-dirty --commit 0.21.3 major
+          env/bin/bumpversion --allow-dirty --commit --new-version 0.21.3 major
           git push
           
