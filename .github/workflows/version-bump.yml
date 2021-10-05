@@ -31,16 +31,17 @@ jobs:
           source env/bin/activate
           pip install --upgrade pip
           
-      - name: Bump version
-        run: |
-          source env/bin/activate
-          pip install -r dev-requirements.txt 
-          env/bin/bumpversion --new-version 0.21.3 major
-          git status
-          
       - name: Generate Docker requirements
         run: |
           source env/bin/activate
           pip install -r requirements.txt 
           pip freeze -l > docker/requirements/requirements.txt
           git status
+
+      - name: Bump version
+        run: |
+          source env/bin/activate
+          pip install -r dev-requirements.txt 
+          env/bin/bumpversion --new-version --allow-dirty --commit 0.21.3 major
+          git push
+          
