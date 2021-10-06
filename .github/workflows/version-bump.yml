@@ -14,8 +14,8 @@ on:
 # Release version number that must be updated for each release
 # 
 env:
-  version_number: '0.21.8'
-  is_dry_run: true
+  version_number_default: '0.22.0'
+  is_dry_run_default: true
  
 jobs:
   bump:
@@ -24,15 +24,16 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v2
 
-      - name: Check inputs
+      - name: Set version and dry run values
+        id: variables
         env:
-          VA: "${{ github.event.client_payload.version_number == '' && env.version_number || github.event.client_payload.version_number }}"
-          TA: "${{ github.event.client_payload.is_dry_run == '' && env.is_dry_run || github.event.client_payload.is_dry_run }}"
+          VERSION_NUMBER: "${{ github.event.client_payload.version_number == '' && env.version_number_default || github.event.client_payload.version_number }}"
+          IS_DRY_RUN: "${{ github.event.client_payload.is_dry_run == '' && env.is_dry_run_default || github.event.client_payload.is_dry_run }}"
         run: |
-          echo ${{ github.event.client_payload.version_number }}
-          echo ${{ github.event.client_payload.is_dry_run }}
-          echo $TA
-          echo $VA
+          echo Dispatch event version: ${{ github.event.client_payload.version_number }}
+          echo Dispatch event dry run: ${{ github.event.client_payload.is_dry_run }}
+          echo '::set-output name=VERSION_NUMBER::$VERSION_NUMBER'
+          echo '::set-output name=IS_DRY_RUN::$IS_DRY_RUN'
 
       - uses: actions/setup-python@v2
         with:
@@ -45,11 +46,11 @@ jobs:
           pip install --upgrade pip     
           
       - name: Create PR branch
-        if: ${{ env.is_dry_run }}
+        if: ${{ steps.variables.outputs.IS_DRY_RUN }}
         run: |
-          git checkout -b bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
-          git push origin bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
-          git branch --set-upstream-to=origin/bumping-version/${{env.version_number}}_$GITHUB_RUN_ID bumping-version/${{env.version_number}}_$GITHUB_RUN_ID
+          git checkout -b bumping-version/${{steps.variables.outputs.VERSION_NUMBER}}_$GITHUB_RUN_ID
+          git push origin bumping-version/${{steps.variables.outputs.VERSION_NUMBER}}_$GITHUB_RUN_ID
+          git branch --set-upstream-to=origin/bumping-version/${{steps.variables.outputs.VERSION_NUMBER}}_$GITHUB_RUN_ID bumping-version/${{steps.variables.outputs.VERSION_NUMBER}}_$GITHUB_RUN_ID
       
       - name: Generate Docker requirements
         run: |
@@ -62,33 +63,33 @@ jobs:
         run: |
           source env/bin/activate
           pip install -r dev-requirements.txt 
-          env/bin/bumpversion --allow-dirty --new-version ${{env.version_number}} major
+          env/bin/bumpversion --allow-dirty --new-version ${{steps.variables.outputs.VERSION_NUMBER}} major
           git status
 
       - name: Commit version bump directly
         uses: EndBug/add-and-commit@v7
-        if: ${{ !env.is_dry_run }}
+        if: ${{ !steps.variables.outputs.IS_DRY_RUN }}
         with:
           author_name: 'Github Build Bot'
           author_email: 'buildbot@fishtownanalytics.com'
-          message: 'Bumping version to ${{env.version_number}}'
+          message: 'Bumping version to ${{steps.variables.outputs.VERSION_NUMBER}}'
 
       - name: Commit version bump to branch
         uses: EndBug/add-and-commit@v7
-        if: ${{ env.is_dry_run }}
+        if: ${{ steps.variables.outputs.IS_DRY_RUN }}
         with:
           author_name: 'Github Build Bot'
           author_email: 'buildbot@fishtownanalytics.com'
-          message: 'Bumping version to ${{env.version_number}}'
-          branch: 'bumping-version/${{env.version_number}}_${{GITHUB.RUN_ID}}'
-          push: 'origin origin/bumping-version/${{env.version_number}}_${{GITHUB.RUN_ID}}'
+          message: 'Bumping version to ${{steps.variables.outputs.VERSION_NUMBER}}'
+          branch: 'bumping-version/${{steps.variables.outputs.VERSION_NUMBER}}_${{GITHUB.RUN_ID}}'
+          push: 'origin origin/bumping-version/${{steps.variables.outputs.VERSION_NUMBER}}_${{GITHUB.RUN_ID}}'
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v3
-        if: ${{ env.is_dry_run }}
+        if: ${{ steps.variables.outputs.IS_DRY_RUN }}
         with:
           author: 'Github Build Bot <buildbot@fishtownanalytics.com>'
           draft: true
           base: ${{github.ref}}
-          title: 'Bumping version to ${{env.version_number}}'
-          branch: 'bumping-version/${{env.version_number}}_${{GITHUB.RUN_ID}}'
+          title: 'Bumping version to ${{steps.variables.outputs.VERSION_NUMBER}}'
+          branch: 'bumping-version/${{steps.variables.outputs.VERSION_NUMBER}}_${{GITHUB.RUN_ID}}'
