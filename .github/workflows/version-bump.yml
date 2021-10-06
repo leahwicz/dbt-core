@@ -12,6 +12,7 @@ on:
     types: [version-bump]
   
 # Release version number that must be updated for each release
+# 
 env:
   version_number: '0.21.8'
   is_dry_run: true
@@ -24,9 +25,14 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Check inputs
+        env:
+          VA: "${{ github.event.client_payload.version_number == '' && version_number || github.event.client_payload.version_number }}"
+          TA: "${{ github.event.client_payload.is_dry_run == '' && is_dry_run || github.event.client_payload.is_dry_run }}"
         run: |
           echo ${{ github.event.client_payload.version_number }}
           echo ${{ github.event.client_payload.is_dry_run }}
+          echo $TA
+          echo $VA
 
       - uses: actions/setup-python@v2
         with:
