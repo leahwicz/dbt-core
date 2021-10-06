@@ -32,8 +32,8 @@ jobs:
         run: |
           echo Dispatch event version: ${{ github.event.client_payload.version_number }}
           echo Dispatch event dry run: ${{ github.event.client_payload.is_dry_run }}
-          echo '::set-output name=VERSION_NUMBER::$VERSION_NUMBER'
-          echo '::set-output name=IS_DRY_RUN::$IS_DRY_RUN'
+          echo ::set-output name=VERSION_NUMBER::$VERSION_NUMBER
+          echo ::set-output name=IS_DRY_RUN::$IS_DRY_RUN
 
       - uses: actions/setup-python@v2
         with:
