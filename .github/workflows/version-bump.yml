@@ -26,8 +26,8 @@ jobs:
 
       - name: Check inputs
         env:
-          VA: "${{ github.event.client_payload.version_number == '' && version_number || github.event.client_payload.version_number }}"
-          TA: "${{ github.event.client_payload.is_dry_run == '' && is_dry_run || github.event.client_payload.is_dry_run }}"
+          VA: "${{ github.event.client_payload.version_number == '' && env.version_number || github.event.client_payload.version_number }}"
+          TA: "${{ github.event.client_payload.is_dry_run == '' && env.is_dry_run || github.event.client_payload.is_dry_run }}"
         run: |
           echo ${{ github.event.client_payload.version_number }}
           echo ${{ github.event.client_payload.is_dry_run }}
