@@ -24,8 +24,8 @@ jobs:
       - name: Set version and dry run values
         id: variables
         env:
-          VERSION_NUMBER: "${{ github.event.client_payload.version_number == '' && github.event.inputs.version_number_default || github.event.client_payload.version_number }}"
-          IS_DRY_RUN: "${{ github.event.client_payload.is_dry_run == '' && github.event.inputs.is_dry_run_default || github.event.client_payload.is_dry_run }}"
+          VERSION_NUMBER: "${{ github.event.client_payload.version_number == '' && github.event.inputs.version_number || github.event.client_payload.version_number }}"
+          IS_DRY_RUN: "${{ github.event.client_payload.is_dry_run == '' && github.event.inputs.is_dry_run || github.event.client_payload.is_dry_run }}"
         run: |
           echo Repository dispatch event version: ${{ github.event.client_payload.version_number }}
           echo Repository dispatch event dry run: ${{ github.event.client_payload.is_dry_run }}
