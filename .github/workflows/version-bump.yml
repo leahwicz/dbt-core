@@ -27,8 +27,10 @@ jobs:
           VERSION_NUMBER: "${{ github.event.client_payload.version_number == '' && github.event.inputs.version_number_default || github.event.client_payload.version_number }}"
           IS_DRY_RUN: "${{ github.event.client_payload.is_dry_run == '' && github.event.inputs.is_dry_run_default || github.event.client_payload.is_dry_run }}"
         run: |
-          echo Dispatch event version: ${{ github.event.client_payload.version_number }}
-          echo Dispatch event dry run: ${{ github.event.client_payload.is_dry_run }}
+          echo Repository dispatch event version: ${{ github.event.client_payload.version_number }}
+          echo Repository dispatch event dry run: ${{ github.event.client_payload.is_dry_run }}
+          echo Workflow dispatch event version: ${{ github.event.inputs.version_number }}
+          echo Workflow dispatch event dry run: ${{ github.event.inputs.is_dry_run }}
           echo ::set-output name=VERSION_NUMBER::$VERSION_NUMBER
           echo ::set-output name=IS_DRY_RUN::$IS_DRY_RUN
 
