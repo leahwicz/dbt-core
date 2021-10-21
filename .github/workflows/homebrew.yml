@@ -1,0 +1,31 @@
+name: Homebrew release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_number:
+       description: 'The version number to bump to'
+       required: true
+      is_dry_run:
+       description: 'Creates a draft PR to allow testing instead of committing to a branch'
+       required: true
+       default: 'true'  
+
+jobs:
+  download-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create artifact dir
+        run: mkdir artifacts
+      - uses: dsaltares/fetch-gh-release-asset@master
+        with:
+          repo: "leahwicz/dbt"
+          version: "tags/v1.0.0b1"
+          file: "dbt_core-1.0.0b1-py3-none-any.whl"
+          target: "artifacts/dbt_core-1.0.0b1-py3-none-any.whl"
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v2
+
+      - name: Run a one-line script
+        run: ls artifacts
+
