@@ -24,8 +24,6 @@ jobs:
           file: "dbt_core-1.0.0b1-py3-none-any.whl"
           target: "artifacts/dbt_core-1.0.0b1-py3-none-any.whl"
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/checkout@v2
-
       - name: Run a one-line script
         run: ls artifacts
 
