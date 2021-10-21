@@ -24,7 +24,7 @@ def read(fname):
 
 
 package_name = "dbt-core"
-package_version = "0.21.6"
+package_version = "1.0.0b1"
 description = """dbt (data build tool) is a command line tool that helps \
 analysts and engineers transform data in their warehouse more effectively"""
 
@@ -36,7 +36,7 @@ setup(
     long_description=description,
     author="dbt Labs",
     author_email="info@dbtlabs.com",
-    url="https://github.com/dbt-labs/dbt",
+    url="https://github.com/dbt-labs/dbt-core",
     packages=find_namespace_packages(include=['dbt', 'dbt.*']),
     include_package_data = True,
     test_suite='test',
@@ -50,13 +50,12 @@ setup(
     ],
     install_requires=[
         'Jinja2==2.11.3',
-        'PyYAML>=3.11',
         'agate>=1.6,<1.6.2',
+        'click>=8,<9',
         'colorama>=0.3.9,<0.4.5',
         'dataclasses>=0.6,<0.9;python_version<"3.7"',
         'hologram==0.0.14',
         'isodate>=0.6,<0.7',
-        'json-rpc>=1.12,<2',
         'logbook>=1.5,<1.6',
         'mashumaro==2.5',
         'minimal-snowplow-tracker==0.0.2',
