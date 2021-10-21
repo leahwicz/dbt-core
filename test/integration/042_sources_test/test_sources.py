@@ -24,7 +24,7 @@ class BaseSourcesTest(DBTIntegrationTest):
     def project_config(self):
         return {
             'config-version': 2,
-            'data-paths': ['data'],
+            'seed-paths': ['seeds'],
             'quoting': {'database': True, 'schema': True, 'identifier': True},
             'seeds': {
                 'quote_columns': True,
@@ -372,7 +372,7 @@ class TestSourceFreshness(SuccessfulSourcesTest):
 
     @use_profile('postgres')
     def test_postgres_source_freshness_selection_exclude(self):
-        """Tests node selection using the --select argument. It 'excludes' the 
+        """Tests node selection using the --select argument. It 'excludes' the
         only source in the project so it should return no results."""
         self._set_updated_at_to(timedelta(hours=-2))
         self.freshness_start_time = datetime.utcnow()
