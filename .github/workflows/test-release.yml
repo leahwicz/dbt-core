@@ -166,7 +166,13 @@ jobs:
           IS_PRERELEASE: ${{ contains(github.event.inputs.version_number, 'rc') ||  contains(github.event.inputs.version_number, 'b') }}
         run: |
           echo ::set-output name=isPrerelease::$IS_PRERELEASE
-         
+      - name: Check source distributions
+        run: |
+          pwd
+          echo "=================="
+          ls
+          echo "=================="
+          ls dist
       - name: Creating GitHub Release
         uses: softprops/action-gh-release@v1
         with:
