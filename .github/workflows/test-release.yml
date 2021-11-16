@@ -148,6 +148,7 @@ jobs:
     name: Pypi release
 
     runs-on: ubuntu-latest
+    needs: test-build
 
     environment: PypiProd
     steps:    
