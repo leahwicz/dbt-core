@@ -1,5 +1,5 @@
 from typing import List
-from dbt.logger import GLOBAL_LOGGER as logger, log_cache_events, log_manager
+from dbt.logger import log_cache_events, log_manager
 
 import argparse
 import os.path
@@ -9,6 +9,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import dbt.version
+from dbt.events.functions import fire_event, setup_event_logger
+from dbt.events.types import (
+    MainEncounteredError, MainKeyboardInterrupt, MainReportVersion, MainReportArgs,
+    MainTrackingUserState, MainStackTrace
+)
 import dbt.flags as flags
 import dbt.task.build as build_task
 import dbt.task.clean as clean_task
@@ -34,7 +39,6 @@ import dbt.tracking
 from dbt.utils import ExitCodes
 from dbt.config.profile import DEFAULT_PROFILES_DIR, read_user_config
 from dbt.exceptions import (
-    RuntimeException,
     InternalException,
     NotImplementedException,
     FailedToConnectException
@@ -127,7 +131,8 @@ def main(args=None):
                 exit_code = ExitCodes.ModelError.value
 
         except KeyboardInterrupt:
-            logger.info("ctrl-c")
+            # if the logger isn't configured yet, it will use the default logger
+            fire_event(MainKeyboardInterrupt())
             exit_code = ExitCodes.UnhandledError.value
 
         # This can be thrown by eg. argparse
@@ -135,16 +140,8 @@ def main(args=None):
             exit_code = e.code
 
         except BaseException as e:
-            logger.warning("Encountered an error:")
-            logger.warning(str(e))
-
-            if log_manager.initialized:
-                logger.debug(traceback.format_exc())
-            elif not isinstance(e, RuntimeException):
-                # if it did not come from dbt proper and the logger is not
-                # initialized (so there's no safe path to log to), log the
-                # stack trace at error level.
-                logger.error(traceback.format_exc())
+            fire_event(MainEncounteredError(e=e))
+            fire_event(MainStackTrace(stack_trace=traceback.format_exc()))
             exit_code = ExitCodes.UnhandledError.value
 
     sys.exit(exit_code)
@@ -208,7 +205,7 @@ def track_run(task):
         )
     except (NotImplementedException,
             FailedToConnectException) as e:
-        logger.error('ERROR: {}'.format(e))
+        fire_event(MainEncounteredError(e=e))
         dbt.tracking.track_invocation_end(
             config=task.config, args=task.args, result_type="error"
         )
@@ -226,23 +223,24 @@ def run_from_args(parsed):
 
     # we can now use the logger for stdout
     # set log_format in the logger
-    parsed.cls.pre_init_hook(parsed)
+    # if 'list' task: set stdout to WARN instead of INFO
+    level_override = parsed.cls.pre_init_hook(parsed)
 
-    logger.info("Running with dbt{}".format(dbt.version.installed))
+    fire_event(MainReportVersion(v=str(dbt.version.installed)))
 
     # this will convert DbtConfigErrors into RuntimeExceptions
     # task could be any one of the task objects
     task = parsed.cls.from_args(args=parsed)
-
-    logger.debug("running dbt with arguments {parsed}", parsed=str(parsed))
+    fire_event(MainReportArgs(args=parsed))
 
     log_path = None
     if task.config is not None:
         log_path = getattr(task.config, 'log_path', None)
     # we can finally set the file logger up
     log_manager.set_path(log_path)
+    setup_event_logger(log_path or 'logs', level_override)
     if dbt.tracking.active_user is not None:  # mypy appeasement, always true
-        logger.debug("Tracking: {}".format(dbt.tracking.active_user.state()))
+        fire_event(MainTrackingUserState(dbt.tracking.active_user.state()))
 
     results = None
 
@@ -343,6 +341,22 @@ def _build_init_subparser(subparsers, base_subparser):
         Initialize a new DBT project.
         '''
     )
+    sub.add_argument(
+        'project_name',
+        nargs='?',
+        help='''
+        Name of the new DBT project.
+        '''
+    )
+    sub.add_argument(
+        '-s',
+        '--skip-profile-setup',
+        dest='skip_profile_setup',
+        action='store_true',
+        help='''
+        Skip interative profile setup.
+        '''
+    )
     sub.set_defaults(cls=init_task.InitTask, which='init', rpc_method=None)
     return sub
 
@@ -377,13 +391,16 @@ def _build_build_subparser(subparsers, base_subparser):
         '''
     )
     sub.add_argument(
-        '--greedy',
-        action='store_true',
+        '--indirect-selection',
+        choices=['eager', 'cautious'],
+        default='eager',
+        dest='indirect_selection',
         help='''
-        Select all tests that touch the selected resources,
-        even if they also depend on unselected resources
-        '''
+            Select all tests that are adjacent to selected resources,
+            even if they those resources have been explicitly selected.
+        ''',
     )
+
     resource_values: List[str] = [
         str(s) for s in build_task.BuildTask.ALL_RESOURCE_VALUES
     ] + ['all']
@@ -721,12 +738,14 @@ def _build_test_subparser(subparsers, base_subparser):
         '''
     )
     sub.add_argument(
-        '--greedy',
-        action='store_true',
+        '--indirect-selection',
+        choices=['eager', 'cautious'],
+        default='eager',
+        dest='indirect_selection',
         help='''
-        Select all tests that touch the selected resources,
-        even if they also depend on unselected resources
-        '''
+            Select all tests that are adjacent to selected resources,
+            even if they those resources have been explicitly selected.
+        ''',
     )
 
     sub.set_defaults(cls=test_task.TestTask, which='test', rpc_method='test')
@@ -824,12 +843,14 @@ def _build_list_subparser(subparsers, base_subparser):
         required=False,
     )
     sub.add_argument(
-        '--greedy',
-        action='store_true',
+        '--indirect-selection',
+        choices=['eager', 'cautious'],
+        default='eager',
+        dest='indirect_selection',
         help='''
-        Select all tests that touch the selected resources,
-        even if they also depend on unselected resources
-        '''
+            Select all tests that are adjacent to selected resources,
+            even if they those resources have been explicitly selected.
+        ''',
     )
     _add_common_selector_arguments(sub)
 
@@ -1089,7 +1110,7 @@ def parse_args(args, cls=DBTArgumentParser):
     _add_selection_arguments(
         run_sub, compile_sub, generate_sub, test_sub, snapshot_sub, seed_sub)
     # --defer
-    _add_defer_argument(run_sub, test_sub, build_sub)
+    _add_defer_argument(run_sub, test_sub, build_sub, snapshot_sub)
     # --full-refresh
     _add_table_mutability_arguments(run_sub, compile_sub, build_sub)
 

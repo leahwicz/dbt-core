@@ -2,13 +2,14 @@ from typing import Iterable, List
 
 import jinja2
 
-from dbt.exceptions import CompilationException
+from dbt.exceptions import ParsingException
 from dbt.clients import jinja
 from dbt.contracts.graph.parsed import ParsedGenericTestNode
 from dbt.contracts.graph.unparsed import UnparsedMacro
 from dbt.contracts.graph.parsed import ParsedMacro
 from dbt.contracts.files import SourceFile
-from dbt.logger import GLOBAL_LOGGER as logger
+from dbt.events.functions import fire_event
+from dbt.events.types import GenericTestFileParse
 from dbt.node_types import NodeType
 from dbt.parser.base import BaseParser
 from dbt.parser.search import FileBlock
@@ -54,14 +55,14 @@ class GenericTestParser(BaseParser[ParsedGenericTestNode]):
                 )
                 if isinstance(t, jinja.BlockTag)
             ]
-        except CompilationException as exc:
+        except ParsingException as exc:
             exc.add_node(base_node)
             raise
 
         for block in blocks:
             try:
                 ast = jinja.parse(block.full_block)
-            except CompilationException as e:
+            except ParsingException as e:
                 e.add_node(base_node)
                 raise
 
@@ -71,7 +72,7 @@ class GenericTestParser(BaseParser[ParsedGenericTestNode]):
             if len(generic_test_nodes) != 1:
                 # things have gone disastrously wrong, we thought we only
                 # parsed one block!
-                raise CompilationException(
+                raise ParsingException(
                     f'Found multiple generic tests in {block.full_block}, expected 1',
                     node=base_node
                 )
@@ -90,7 +91,7 @@ class GenericTestParser(BaseParser[ParsedGenericTestNode]):
         source_file = block.file
         assert isinstance(source_file.contents, str)
         original_file_path = source_file.path.original_file_path
-        logger.debug("Parsing {}".format(original_file_path))
+        fire_event(GenericTestFileParse(path=original_file_path))
 
         # this is really only used for error messages
         base_node = UnparsedMacro(

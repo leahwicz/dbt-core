@@ -223,6 +223,7 @@ class SchemaSourceFile(BaseSourceFile):
     tests: Dict[str, Any] = field(default_factory=dict)
     sources: List[str] = field(default_factory=list)
     exposures: List[str] = field(default_factory=list)
+    metrics: List[str] = field(default_factory=list)
     # node patches contain models, seeds, snapshots, analyses
     ndp: List[str] = field(default_factory=list)
     # any macro patches in this file by macro unique_id.
@@ -300,6 +301,22 @@ class SchemaSourceFile(BaseSourceFile):
             for name in self.tests[key]:
                 test_ids.extend(self.tests[key][name])
         return test_ids
+
+    def add_env_var(self, var, yaml_key, name):
+        if yaml_key not in self.env_vars:
+            self.env_vars[yaml_key] = {}
+        if name not in self.env_vars[yaml_key]:
+            self.env_vars[yaml_key][name] = []
+        if var not in self.env_vars[yaml_key][name]:
+            self.env_vars[yaml_key][name].append(var)
+
+    def delete_from_env_vars(self, yaml_key, name):
+        # We delete all vars for this yaml_key/name because the
+        # entry has been scheduled for reparsing.
+        if yaml_key in self.env_vars and name in self.env_vars[yaml_key]:
+            del self.env_vars[yaml_key][name]
+            if not self.env_vars[yaml_key]:
+                del self.env_vars[yaml_key]
 
 
 AnySourceFile = Union[SchemaSourceFile, SourceFile]

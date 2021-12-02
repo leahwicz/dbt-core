@@ -1,4 +1,4 @@
-from dbt.exceptions import CompilationException
+from dbt.exceptions import CompilationException, ParsingException
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.files import ParseFileType
 from dbt.contracts.results import TestStatus
@@ -25,7 +25,7 @@ class BasePPTest(DBTIntegrationTest):
     def project_config(self):
         return {
             'config-version': 2,
-            'data-paths': ['seeds'],
+            'seed-paths': ['seeds'],
             'test-paths': ['tests'],
             'macro-paths': ['macros'],
             'analysis-paths': ['analyses'],

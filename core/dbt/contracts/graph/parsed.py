@@ -26,11 +26,10 @@ from dbt.contracts.graph.unparsed import (
     UnparsedBaseNode, FreshnessThreshold, ExternalTable,
     HasYamlMetadata, MacroArgument, UnparsedSourceDefinition,
     UnparsedSourceTableDefinition, UnparsedColumn, TestDef,
-    ExposureOwner, ExposureType, MaturityType
+    ExposureOwner, ExposureType, MaturityType, MetricFilter
 )
 from dbt.contracts.util import Replaceable, AdditionalPropertiesMixin
 from dbt.exceptions import warn_or_error
-from dbt.logger import GLOBAL_LOGGER as logger  # noqa
 from dbt import flags
 from dbt.node_types import NodeType
 
@@ -195,6 +194,7 @@ class ParsedNodeDefaults(ParsedNodeMandatory):
     unrendered_config: Dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=lambda: time.time())
     config_call_dict: Dict[str, Any] = field(default_factory=dict)
+    _event_status: Dict[str, Any] = field(default_factory=dict)
 
     def write_node(self, target_path: str, subdirectory: str, payload: str):
         if (os.path.basename(self.path) ==
@@ -224,6 +224,8 @@ class ParsedNode(ParsedNodeDefaults, ParsedNodeMixins, SerializableType):
     def __post_serialize__(self, dct):
         if 'config_call_dict' in dct:
             del dct['config_call_dict']
+        if '_event_status' in dct:
+            del dct['_event_status']
         return dct
 
     @classmethod
@@ -410,6 +412,9 @@ class ParsedSeedNode(ParsedNode):
 @dataclass
 class TestMetadata(dbtClassMixin, Replaceable):
     name: str
+    # kwargs are the args that are left in the test builder after
+    # removing configs. They are set from the test builder when
+    # the test node is created.
     kwargs: Dict[str, Any] = field(default_factory=dict)
     namespace: Optional[str] = None
 
@@ -432,6 +437,7 @@ class ParsedGenericTestNode(ParsedNode, HasTestMetadata):
     # keep this in sync with CompiledGenericTestNode!
     resource_type: NodeType = field(metadata={'restrict': [NodeType.Test]})
     column_name: Optional[str] = None
+    file_key_name: Optional[str] = None
     # Was not able to make mypy happy and keep the code working. We need to
     # refactor the various configs.
     config: TestConfig = field(default_factory=TestConfig)  # type: ignore
@@ -623,6 +629,12 @@ class ParsedSourceDefinition(
     unrendered_config: Dict[str, Any] = field(default_factory=dict)
     relation_name: Optional[str] = None
     created_at: float = field(default_factory=lambda: time.time())
+    _event_status: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_serialize__(self, dct):
+        if '_event_status' in dct:
+            del dct['_event_status']
+        return dct
 
     def same_database_representation(
         self, other: 'ParsedSourceDefinition'
@@ -779,6 +791,81 @@ class ParsedExposure(UnparsedBaseNode, HasUniqueID, HasFqn):
         )
 
 
+@dataclass
+class ParsedMetric(UnparsedBaseNode, HasUniqueID, HasFqn):
+    model: str
+    name: str
+    description: str
+    label: str
+    type: str
+    sql: Optional[str]
+    timestamp: Optional[str]
+    filters: List[MetricFilter]
+    time_grains: List[str]
+    dimensions: List[str]
+    resource_type: NodeType = NodeType.Metric
+    meta: Dict[str, Any] = field(default_factory=dict)
+    tags: List[str] = field(default_factory=list)
+    sources: List[List[str]] = field(default_factory=list)
+    depends_on: DependsOn = field(default_factory=DependsOn)
+    refs: List[List[str]] = field(default_factory=list)
+    created_at: float = field(default_factory=lambda: time.time())
+
+    @property
+    def depends_on_nodes(self):
+        return self.depends_on.nodes
+
+    @property
+    def search_name(self):
+        return self.name
+
+    def same_model(self, old: 'ParsedMetric') -> bool:
+        return self.model == old.model
+
+    def same_dimensions(self, old: 'ParsedMetric') -> bool:
+        return self.dimensions == old.dimensions
+
+    def same_filters(self, old: 'ParsedMetric') -> bool:
+        return self.filters == old.filters
+
+    def same_description(self, old: 'ParsedMetric') -> bool:
+        return self.description == old.description
+
+    def same_label(self, old: 'ParsedMetric') -> bool:
+        return self.label == old.label
+
+    def same_type(self, old: 'ParsedMetric') -> bool:
+        return self.type == old.type
+
+    def same_sql(self, old: 'ParsedMetric') -> bool:
+        return self.sql == old.sql
+
+    def same_timestamp(self, old: 'ParsedMetric') -> bool:
+        return self.timestamp == old.timestamp
+
+    def same_time_grains(self, old: 'ParsedMetric') -> bool:
+        return self.time_grains == old.time_grains
+
+    def same_contents(self, old: Optional['ParsedMetric']) -> bool:
+        # existing when it didn't before is a change!
+        # metadata/tags changes are not "changes"
+        if old is None:
+            return True
+
+        return (
+            self.same_model(old) and
+            self.same_dimensions(old) and
+            self.same_filters(old) and
+            self.same_description(old) and
+            self.same_label(old) and
+            self.same_type(old) and
+            self.same_sql(old) and
+            self.same_timestamp(old) and
+            self.same_time_grains(old) and
+            True
+        )
+
+
 ManifestNodes = Union[
     ParsedAnalysisNode,
     ParsedSingularTestNode,
@@ -797,5 +884,6 @@ ParsedResource = Union[
     ParsedMacro,
     ParsedNode,
     ParsedExposure,
+    ParsedMetric,
     ParsedSourceDefinition,
 ]

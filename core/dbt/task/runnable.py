@@ -11,16 +11,13 @@ from pathlib import PosixPath, WindowsPath
 from .printer import (
     print_run_result_error,
     print_run_end_messages,
-    print_cancel_line,
 )
 
-from dbt import ui
 from dbt.clients.system import write_file
 from dbt.task.base import ConfiguredTask
 from dbt.adapters.base import BaseRelation
 from dbt.adapters.factory import get_adapter
 from dbt.logger import (
-    GLOBAL_LOGGER as logger,
     DbtProcessState,
     TextOnly,
     UniqueID,
@@ -28,13 +25,16 @@ from dbt.logger import (
     DbtModelState,
     ModelMetadata,
     NodeCount,
-    print_timestamped_line,
 )
-
+from dbt.events.functions import fire_event
+from dbt.events.types import (
+    EmptyLine, PrintCancelLine, DefaultSelector, NodeStart, NodeFinished,
+    QueryCancelationUnsupported, ConcurrencyLine
+)
 from dbt.contracts.graph.compiled import CompileResultNode
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.graph.parsed import ParsedSourceDefinition
-from dbt.contracts.results import NodeStatus, RunExecutionResult
+from dbt.contracts.results import NodeStatus, RunExecutionResult, RunningStatus
 from dbt.contracts.state import PreviousState
 from dbt.exceptions import (
     InternalException,
@@ -133,7 +133,7 @@ class GraphRunnableTask(ManifestTask):
             spec = self.config.get_selector(self.args.selector_name)
         elif not (self.selection_arg or self.exclusion_arg) and default_selector_name:
             # use pre-defined selector (--selector) with default: true
-            logger.info(f"Using default selector {default_selector_name}")
+            fire_event(DefaultSelector(name=default_selector_name))
             spec = self.config.get_selector(default_selector_name)
         else:
             # use --select and --exclude args
@@ -189,6 +189,8 @@ class GraphRunnableTask(ManifestTask):
 
     def get_runner(self, node):
         adapter = get_adapter(self.config)
+        run_count: int = 0
+        num_nodes: int = 0
 
         if node.is_ephemeral_model:
             run_count = 0
@@ -206,19 +208,39 @@ class GraphRunnableTask(ManifestTask):
         with RUNNING_STATE, uid_context:
             startctx = TimestampNamed('node_started_at')
             index = self.index_offset(runner.node_index)
+            runner.node._event_status['dbt_internal__started_at'] = datetime.utcnow().isoformat()
+            runner.node._event_status['node_status'] = RunningStatus.Started
             extended_metadata = ModelMetadata(runner.node, index)
+
             with startctx, extended_metadata:
-                logger.debug('Began running node {}'.format(
-                    runner.node.unique_id))
-            status: Dict[str, str]
+                fire_event(
+                    NodeStart(
+                        report_node_data=runner.node,
+                        unique_id=runner.node.unique_id,
+                    )
+                )
+            status: Dict[str, str] = {}
             try:
                 result = runner.run_with_hooks(self.manifest)
                 status = runner.get_result_status(result)
+                runner.node._event_status['node_status'] = result.status
+                runner.node._event_status['dbt_internal__finished_at'] = \
+                    datetime.utcnow().isoformat()
             finally:
-                finishctx = TimestampNamed('node_finished_at')
+                finishctx = TimestampNamed('finished_at')
                 with finishctx, DbtModelState(status):
-                    logger.debug('Finished running node {}'.format(
-                        runner.node.unique_id))
+                    fire_event(
+                        NodeFinished(
+                            report_node_data=runner.node,
+                            unique_id=runner.node.unique_id,
+                            run_result=result
+                        )
+                    )
+            # `_event_status` dict is only used for logging.  Make sure
+            # it gets deleted when we're done with it
+            del runner.node._event_status["dbt_internal__started_at"]
+            del runner.node._event_status["dbt_internal__finished_at"]
+            del runner.node._event_status["node_status"]
 
         fail_fast = flags.FAIL_FAST
 
@@ -337,12 +359,7 @@ class GraphRunnableTask(ManifestTask):
         adapter = get_adapter(self.config)
 
         if not adapter.is_cancelable():
-            msg = ("The {} adapter does not support query "
-                   "cancellation. Some queries may still be "
-                   "running!".format(adapter.type()))
-
-            yellow = ui.COLOR_FG_YELLOW
-            print_timestamped_line(msg, yellow)
+            fire_event(QueryCancelationUnsupported(type=adapter.type))
         else:
             with adapter.connection_named('master'):
                 for conn_name in adapter.cancel_open_connections():
@@ -352,7 +369,7 @@ class GraphRunnableTask(ManifestTask):
                             continue
                     # if we don't have a manifest/don't have a node, print
                     # anyway.
-                    print_cancel_line(conn_name)
+                    fire_event(PrintCancelLine(conn_name=conn_name))
 
         pool.join()
 
@@ -363,9 +380,9 @@ class GraphRunnableTask(ManifestTask):
         text = "Concurrency: {} threads (target='{}')"
         concurrency_line = text.format(num_threads, target_name)
         with NodeCount(self.num_nodes):
-            print_timestamped_line(concurrency_line)
+            fire_event(ConcurrencyLine(concurrency_line=concurrency_line))
         with TextOnly():
-            print_timestamped_line("")
+            fire_event(EmptyLine())
 
         pool = ThreadPool(num_threads)
         try:
@@ -453,7 +470,7 @@ class GraphRunnableTask(ManifestTask):
             )
         else:
             with TextOnly():
-                logger.info("")
+                fire_event(EmptyLine())
             selected_uids = frozenset(n.unique_id for n in self._flattened_nodes)
             result = self.execute_with_hooks(selected_uids)
 

@@ -6,13 +6,17 @@ from typing import (
 
 from dbt import flags
 from dbt import tracking
-from dbt.clients.jinja import undefined_error, get_rendered
+from dbt.clients.jinja import get_rendered
 from dbt.clients.yaml_helper import (  # noqa: F401
     yaml, safe_load, SafeLoader, Loader, Dumper
 )
 from dbt.contracts.graph.compiled import CompiledResource
-from dbt.exceptions import raise_compiler_error, MacroReturn
-from dbt.logger import GLOBAL_LOGGER as logger
+from dbt.exceptions import (
+    raise_compiler_error, MacroReturn, raise_parsing_error, disallow_secret_env_var
+)
+from dbt.logger import SECRET_ENV_PREFIX
+from dbt.events.functions import fire_event, get_invocation_id
+from dbt.events.types import MacroEventInfo, MacroEventDebug
 from dbt.version import __version__ as dbt_version
 
 # These modules are added to the context. Consider alternative
@@ -20,6 +24,39 @@ from dbt.version import __version__ as dbt_version
 import pytz
 import datetime
 import re
+
+# Contexts in dbt Core
+# Contexts are used for Jinja rendering. They include context methods,
+# executable macros, and various settings that are available in Jinja.
+#
+# Different contexts are used in different places because we allow access
+# to different methods and data in different places. Executable SQL, for
+# example, includes the available macros and the model, while Jinja in
+# yaml files is more limited.
+#
+# The context that is passed to Jinja is always in a dictionary format,
+# not an actual class, so a 'to_dict()' is executed on a context class
+# before it is used for rendering.
+#
+# Each context has a generate_<name>_context function to create the context.
+# ProviderContext subclasses have different generate functions for
+# parsing and for execution.
+#
+# Context class hierarchy
+#
+#   BaseContext -- core/dbt/context/base.py
+#     SecretContext -- core/dbt/context/secret.py
+#     TargetContext -- core/dbt/context/target.py
+#       ConfiguredContext -- core/dbt/context/configured.py
+#         SchemaYamlContext -- core/dbt/context/configured.py
+#           DocsRuntimeContext -- core/dbt/context/configured.py
+#         MacroResolvingContext -- core/dbt/context/configured.py
+#         ManifestContext -- core/dbt/context/manifest.py
+#           QueryHeaderContext -- core/dbt/context/manifest.py
+#           ProviderContext -- core/dbt/context/provider.py
+#             MacroContext -- core/dbt/context/provider.py
+#             ModelContext -- core/dbt/context/provider.py
+#             TestContext -- core/dbt/context/provider.py
 
 
 def get_pytz_module_context() -> Dict[str, Any]:
@@ -164,7 +201,6 @@ class BaseContext(metaclass=ContextMeta):
     def __init__(self, cli_vars):
         self._ctx = {}
         self.cli_vars = cli_vars
-        # Save the env_vars encountered using this
         self.env_vars = {}
 
     def generate_builtins(self):
@@ -281,6 +317,8 @@ class BaseContext(metaclass=ContextMeta):
         If the default is None, raise an exception for an undefined variable.
         """
         return_value = None
+        if var.startswith(SECRET_ENV_PREFIX):
+            disallow_secret_env_var(var)
         if var in os.environ:
             return_value = os.environ[var]
         elif default is not None:
@@ -291,7 +329,7 @@ class BaseContext(metaclass=ContextMeta):
             return return_value
         else:
             msg = f"Env var required but not provided: '{var}'"
-            undefined_error(msg)
+            raise_parsing_error(msg)
 
     if os.environ.get('DBT_MACRO_DEBUGGING'):
         @contextmember
@@ -450,9 +488,9 @@ class BaseContext(metaclass=ContextMeta):
             {% endmacro %}"
         """
         if info:
-            logger.info(msg)
+            fire_event(MacroEventInfo(msg))
         else:
-            logger.debug(msg)
+            fire_event(MacroEventDebug(msg))
         return ''
 
     @contextproperty
@@ -488,10 +526,7 @@ class BaseContext(metaclass=ContextMeta):
         """invocation_id outputs a UUID generated for this dbt run (useful for
         auditing)
         """
-        if tracking.active_user is not None:
-            return tracking.active_user.invocation_id
-        else:
-            return None
+        return get_invocation_id()
 
     @contextproperty
     def modules(self) -> Dict[str, Any]:

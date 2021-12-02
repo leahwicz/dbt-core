@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import yaml
 
-from dbt.exceptions import CompilationException
+from dbt.exceptions import ParsingException
 import dbt.tracking
 import dbt.version
 from test.integration.base import DBTIntegrationTest, use_profile, AnyFloat, \
@@ -248,7 +248,7 @@ class TestSourceFreshness(SuccessfulSourcesTest):
         assert isinstance(data['elapsed_time'], float)
         self.assertBetween(data['metadata']['generated_at'],
                            self.freshness_start_time)
-        assert data['metadata']['dbt_schema_version'] == 'https://schemas.getdbt.com/dbt/sources/v2.json'
+        assert data['metadata']['dbt_schema_version'] == 'https://schemas.getdbt.com/dbt/sources/v3.json'
         assert data['metadata']['dbt_version'] == dbt.version.__version__
         assert data['metadata']['invocation_id'] == dbt.tracking.active_user.invocation_id
         key = 'key'
@@ -523,7 +523,7 @@ class TestMalformedSources(BaseSourcesTest):
 
     @use_profile('postgres')
     def test_postgres_malformed_schema_will_break_run(self):
-        with self.assertRaises(CompilationException):
+        with self.assertRaises(ParsingException):
             self.run_dbt_with_vars(['seed'])
 
 
