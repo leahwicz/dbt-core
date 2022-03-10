@@ -46,6 +46,7 @@ class BasePPTest(DBTIntegrationTest):
         os.mkdir(os.path.join(self.test_root_dir, 'macros'))
         os.mkdir(os.path.join(self.test_root_dir, 'analyses'))
         os.mkdir(os.path.join(self.test_root_dir, 'snapshots'))
+        os.environ['DBT_PP_TEST'] = 'true'
 
 
 
@@ -332,12 +333,18 @@ class TestSources(BasePPTest):
         results = self.run_dbt(["--partial-parse", "run"])
 
         # Add a data test
+        self.copy_file('test-files/test-macro.sql', 'macros/test-macro.sql')
         self.copy_file('test-files/my_test.sql', 'tests/my_test.sql')
         results = self.run_dbt(["--partial-parse", "test"])
         manifest = get_manifest()
         self.assertEqual(len(manifest.nodes), 9)
         test_id = 'test.test.my_test'
         self.assertIn(test_id, manifest.nodes)
+
+        # Change macro that data test depends on
+        self.copy_file('test-files/test-macro2.sql', 'macros/test-macro.sql')
+        results = self.run_dbt(["--partial-parse", "test"])
+        manifest = get_manifest()
 
         # Add an analysis
         self.copy_file('test-files/my_analysis.sql', 'analyses/my_analysis.sql')
@@ -496,10 +503,12 @@ class TestSnapshots(BasePPTest):
         manifest = get_manifest()
         snapshot_id = 'snapshot.test.orders_snapshot'
         self.assertIn(snapshot_id, manifest.nodes)
+        snapshot2_id = 'snapshot.test.orders2_snapshot'
+        self.assertIn(snapshot2_id, manifest.nodes)
 
         # run snapshot
         results = self.run_dbt(["--partial-parse", "snapshot"])
-        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results), 2)
 
         # modify snapshot
         self.copy_file('test-files/snapshot2.sql', 'snapshots/snapshot.sql')
