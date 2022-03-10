@@ -1,0 +1,167 @@
+# **what?**
+# This workflow models the performance characteristics of a point in time in dbt.
+# It runs specific dbt commands on committed projects multiple times to create and
+# commit information about the distribution to the current branch. For more information
+# see the readme in the performance module at /performance/README.md.
+#
+# **why?**
+# When developing new features, we can take quick performance samples and compare
+# them against the commited baseline measurements produced by this workflow to detect
+# some performance regressions at development time before they reach users.
+#
+# **when?**
+# This is only run once directly after each release. If for some reason the results of
+# a run are not satisfactory, it can also be triggered manually.
+
+name: Model Performance Characteristics
+
+on:
+  # runs after non-prereleases are published.
+  release:
+    types: [released]
+  # run manually from the actions tab
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: dbt version to model (must be non-prerelease in Pypi) (^^ always run from main)
+        default: 9.9.9
+        required: true
+      commit_results:
+        description: commit results directly to the above branch when finished? (true/false)
+        default: false
+
+env:
+  RUNNER_CACHE_PATH: performance/runner/target/release/runner
+
+# both jobs need to write
+permissions:
+  contents: write
+
+jobs:
+  latest-runner:
+    name: Build or Fetch Performance Runner
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-D warnings"
+    steps:
+
+      # explicitly checkout the performance runner from main regardless of which
+      # version we are modeling.
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          ref: main
+
+      # create a cache key that will be used in the next job. without this the
+      # next job would have to checkout from main an hash the files itself.
+      - name: Create Cache Key
+        id: cacheKey
+        run: echo "::set-output name=key::${{ runner.os }}-${{ hashFiles('performance/runner/Cargo.toml')}}-${{ hashFiles('performance/runner/src/*') }}"
+        working-directory: ${{ env.RUNNER_CACHE_PATH }}
+
+      # attempts to access a previously cached runner
+      - uses: actions/cache@v2
+        id: cache
+        with:
+          path: ${{ env.RUNNER_CACHE_PATH }}
+          key: ${{ steps.cacheKey.outputs.key }}
+
+      - name: Fetch Rust Toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Add fmt
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: rustup component add rustfmt
+
+      - name: Cargo fmt
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path performance/runner/Cargo.toml --all -- --check
+
+      - name: Test
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --manifest-path performance/runner/Cargo.toml
+
+      - name: Build (optimized)
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --manifest-path performance/runner/Cargo.toml
+      # the cache action automatically caches this binary at the end of the job
+
+  # run the performance measurements on the current or default branch
+  # TODO get the version from pypi instead
+  model:
+    # depends on `latest-runner` as a separate job so that failures in this job do not prevent
+    # a successfully tested and built binary from being cached.
+    needs: [latest-runner]
+    name: Model a release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set Release Id and Commit Flag
+        id: variables
+        run: |
+          echo $GITHUB_EVENT_NAME
+          # users are prompted to input with the correct format
+          if [[ $GITHUB_EVENT_NAME == "workflow_dispatch" ]]; then
+            echo "Workflow dispatch event detected"
+            echo "::set-output name=release_id::${{github.event.inputs.release_id}}"
+            echo "::set-output name=commit::${{github.event.inputs.commit_results}}"
+          # release.tag_name has a v prepended. we must remove it.
+          else
+            echo "release event detected"
+            with_v=${{github.event.release.tag_name}}
+            without_v=${with_v:1}
+            echo "::set-output name=release_id::$without_v"
+            echo "::set-output name=commit::true"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v2.2.2
+        with:
+          python-version: "3.8"
+
+      - name: Install dbt
+        run: pip install dbt-postgres==${{ steps.variables.outputs.release_id }}
+
+      - name: Install Hyperfine
+        run: wget https://github.com/sharkdp/hyperfine/releases/download/v1.11.0/hyperfine_1.11.0_amd64.deb && sudo dpkg -i hyperfine_1.11.0_amd64.deb
+
+      # this was built in the previous job so it will be there.
+      - name: Fetch Runner
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: ${{ env.RUNNER_CACHE_PATH }}
+          key: ${{ steps.cacheKey.outputs.key }}
+
+      - name: Move Runner
+        run: mv performance/runner/target/release/runner ./performance/app
+
+      - name: Change Runner Permissions
+        run: chmod +x ./performance/app
+
+      # `${{ github.workspace }}` is used to pass the absolute path
+      - name: Run Measurement
+        run: mkdir tmp && mkdir baselines/${{ steps.variables.outputs.release_id }}/ && ls -F && ./app model -v ${{ steps.setId.outputs.release_id }} -b ${{ github.workspace }}/performance/baselines/ -p ${{ github.workspace }}/performance/projects/ -t ${{ github.workspace }}/performance/tmp/ -n 2
+        working-directory: ${{ github.workspace }}/performance/
+
+      - name: Commit Baseline
+        uses: EndBug/add-and-commit@v8
+        if: ${{ steps.variables.outputs.commit == 'true' }}
+        with:
+          add: ${{ github.workspace }}/performance/baselines
+          author_name: 'Github Build Bot'
+          author_email: 'buildbot@fishtownanalytics.com'
+          message: 'adding performance baseline for ${{ steps.variables.outputs.release_id }}'
