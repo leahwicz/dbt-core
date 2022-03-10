@@ -35,7 +35,7 @@ env:
 
 # both jobs need to write
 permissions:
-  content: write
+  contents: write
 
 jobs:
   latest-runner:
@@ -109,7 +109,6 @@ jobs:
     name: Model a release
     runs-on: ubuntu-latest
     steps:
-      steps:
       - name: Set Release Id and Commit Flag
         id: variables
         run: |
