@@ -21,7 +21,7 @@ jobs:
           formula-name: dbt-postgres
           formula-path: Formula/dbt-postgres.rb
           homebrew-tap: dbt-labs/homebrew-dbt
-          base-branch: master
+          base-branch: test-homebrew
           create-pullrequest: true
           download-url: https://github.com/dbt-labs/dbt-core/releases/download/v${{ github.event.inputs.version_number }}/dbt-postgres-${{ github.event.inputs.version_number }}.tar.gz
           commit-message: |
