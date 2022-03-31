@@ -1,6 +1,6 @@
 The core function of dbt is SQL compilation and execution. Users create projects of dbt resources (models, tests, seeds, snapshots, ...), defined in SQL and YAML files, and they invoke dbt to create, update, or query associated views and tables. Today, dbt makes heavy use of Jinja2 to enable the templating of SQL, and to construct a DAG (Directed Acyclic Graph) from all of the resources in a project. Users can also extend their projects by installing resources (including Jinja macros) from other projects, called "packages."
 
-## dbt-core
+## dbt-core testing changes
 
 Most of the python code in the repository is within the `core/dbt` directory.
 - [`single python files`](core/dbt/README.md): A number of individual files, such as 'compilation.py' and 'exceptions.py'
