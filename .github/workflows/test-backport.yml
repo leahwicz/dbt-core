@@ -43,6 +43,6 @@ jobs:
         )
       )
     steps:
-      - uses: tibdex/backport@v2.0.2
+      - uses: tibdex/backport@v1.1.1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
