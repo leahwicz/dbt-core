@@ -20,7 +20,6 @@ name: Backport
 on:
   pull_request_target:
     types:
-      - closed
       - labeled
 
 permissions:
@@ -35,8 +34,8 @@ jobs:
     # See https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target.
     if: >
       github.event.pull_request.merged
-      && contains(github.event.pull_request.labels, 'backport')
+      && contains(github.event.label.name, 'backport')
     steps:
-      - uses: tibdex/backport@v1.1.1
+      - uses: tibdex/backport@v2.0.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
