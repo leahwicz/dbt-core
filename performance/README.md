@@ -18,13 +18,15 @@ Here are all the components of the testing module:
 - A GitHub action for modeling the performance distribution for a new release: `/.github/workflows/model_performance.yml`.
 - A GitHub action for sampling performance of dbt at your commit and comparing it against a previous release: `/.github/workflows/sample_performance.yml`.
 
+At this time, the biggest risk in the design of this project is how to account for the natural variation of GitHub Action runs. Typically, performance work is done on dedicated hardware to elimiate this factor. However, there are ways to integrate the variation in obeservation tools if it can be measured.
+
 ## Adding Test Scenarios
 
 A clear process for maintainers and community members to add new performance testing targets will exist after the next stage of the test suite is complete. For details, see #4768.
 
 ## Investigating Regressions
 
-If your commit has failed one of the performance regression tests, it does not necessarily mean your commit has a performance regression. However, the observed runtime value was so much slower than the expected value that it was unlikely to be random noise. This means that any commit after the release it is being compared against through this failing commit might contain the cause. Start by investigating the failing commit and working your way backwards.
+If your commit has failed one of the performance regression tests, it does not necessarily mean your commit has a performance regression. However, the observed runtime value was so much slower than the expected value that it was unlikely to be random noise. If it is not due to random noise, this commit contains the code that is causing this performance regression. However, it may not be the commit that introduced that code. That code may have been introduced in the commit before even if it passed due to natural variation in sampling. When investigating a performance regression, start with the failing commit and working your way backwards.
 
 Here's an example of how this could happen:
 
@@ -45,6 +47,8 @@ F      <- the first failing commit
 - Commit F samples a value of 32.9 seconds and fails
 
 Because these performance regression tests are non-deterministic, it is frequently going to be possible to rerun the test on a failing commit and get it to pass. The more often we do this, the farther down the commit history we will be punting detection.
+
+If your PR is against `main` your commits will be compared against the latest baseline measurement found in `performance/baselines`. If this commit needs to be backported, that PR will be against the `.latest` branch and will also compare against the latest baseline measurement found in `performance/baselines` in that branch. These two versions may be the same or they may be different. For example, If the latest version of dbt is v1.99.0, the performance sample of your PR against main will compare against the baseline for v1.99.0. When those commits are backported to `1.98.latest` those commits will be compared against the baseline for v1.98.6 (or whatever the latest is at that time). Even if the compared baseline is the same, a different sample is taken for each PR. In this case, even though it should be rare, it is possible for a performance regression to be detected in one of the two PRs even with the same baseline due to variation in sampling.
 
 ## The Statistics
 Particle physicists need to be confident in declaring new discoveries, snack manufacturers need to be sure each individual item is within the regulated margin of error for nutrition facts, and weight-rated climbing gear needs to be produced so you can trust your life to every unit that comes off the line. All of these use cases use the same kind of math to meet their needs: sigma-based p-values. This section will peel apart that math with the help of a physicist and walk through how we apply this approach to performance regression testing in this test suite.
@@ -71,7 +75,7 @@ When detecting performance regressions that trigger alerts, block PRs, or delay 
 
 In practice, the number of performance regression failures due to random noise will be higher because we are not incorporating the variance of the tools we use to measure, namely GHA.
 
-### Concrete Example
+### Concrete Example: Performance Regression Detection
 
 The following example data was collected by running the code in this repository in Github Actions.
 
@@ -92,6 +96,19 @@ x > 41.98
 If when we sample a single `dbt parse` of the same project with a commit slated to go into dbt v1.0.4, we observe a 42s parse time, then this observation is so unlikely if there were no code-induced performance regressions, that we should investigate if there is a performance regression in any of the commits between this failure and the commit where the initial distribution was measured.
 
 Observations with 3 sigma significance that are _not_ performance regressions could be due to observing unlikely values (roughly 1 in every 750 observations), or variations in the instruments we use to take these measurements such as github actions. At this time we do not measure the variation in the instruments we use to account for these in our calculations which means failures due to random noise are more likely than they would be if we did take them into account.
+
+### Concrete Example: Performance Modeling
+
+Once a new dbt version is released (excluding pre-releases), the performance characteristics of that released version need to be measured. In this repository this measurement is referred to as a baseline.
+
+After dbt v1.0.99 is released, a github action running from `main`, for the latest version of that action, takes the following steps:
+- Checks out main for the latest performance runner
+- pip installs dbt v1.0.99
+- builds the runner if it's not already in the github actions cache
+- uses the performance runner model sub command with `./runner model`.
+- The model subcommand calls hyperfine to run all of the project-command pairs a large number of times (maybe 20 or so) and save the hyperfine outputs to files in `performance/baselines/1.0.99/` one file per command-project pair.
+- The action opens two PRs with these files: one against `main` and one against `1.0.latest` so that future PRs against these branches will detect regressions against the performance characteristics of dbt v1.0.99 instead of v1.0.98.
+- The release driver for dbt v1.0.99 reviews and merges these PRs which is the sole deliverable of the performance modeling work.
 
 ## Future work
 - pin commands to projects by reading commands from a file defined in the project.

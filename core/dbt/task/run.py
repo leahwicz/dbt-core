@@ -398,11 +398,13 @@ class RunTask(CompileTask):
         execution = ""
 
         if execution_time is not None:
-            execution = " in {execution_time:0.2f}s".format(execution_time=execution_time)
+            execution = utils.humanize_execution_time(execution_time=execution_time)
 
         with TextOnly():
             fire_event(EmptyLine())
-        fire_event(HookFinished(stat_line=stat_line, execution=execution))
+        fire_event(
+            HookFinished(stat_line=stat_line, execution=execution, execution_time=execution_time)
+        )
 
     def _get_deferred_manifest(self) -> Optional[WritableManifest]:
         if not self.args.defer:
@@ -436,8 +438,9 @@ class RunTask(CompileTask):
 
     def before_run(self, adapter, selected_uids: AbstractSet[str]):
         with adapter.connection_named("master"):
-            self.create_schemas(adapter, selected_uids)
-            self.populate_adapter_cache(adapter)
+            required_schemas = self.get_model_schemas(adapter, selected_uids)
+            self.create_schemas(adapter, required_schemas)
+            self.populate_adapter_cache(adapter, required_schemas)
             self.defer_to_manifest(adapter, selected_uids)
             self.safe_run_hooks(adapter, RunHookType.Start, {})
 

@@ -13,7 +13,7 @@ use std::{cmp, fs};
 // To add a new metric to the test suite, simply define it in this list
 static METRICS: [HyperfineCmd; 1] = [HyperfineCmd {
     name: "parse",
-    prepare: "rm -rf target/",
+    prepare: "dbt clean",
     cmd: "dbt parse --no-version-check",
 }];
 
@@ -200,8 +200,8 @@ fn run_hyperfine(
 // Attempt to delete the directory and its contents. If it doesn't exist we'll just recreate it anyway.
 fn clear_dir(dir: &dyn AsRef<Path>) -> Result<(), io::Error> {
     match fs::remove_dir_all(dir) {
-        // whether it existed or not, create the directory.
-        _ => fs::create_dir(dir),
+        // whether it existed or not, create the directory and any missing parent dirs.
+        _ => fs::create_dir_all(dir),
     }
 }
 
