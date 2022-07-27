@@ -62,7 +62,7 @@ jobs:
       - name: Format bumpversion file
         continue-on-error: true
         run: |
-          git add .bumpversion.cfg
+          brew install pre-commit
           pre-commit run trailing-whitespace --files .bumpversion.cfg
           git status
           
