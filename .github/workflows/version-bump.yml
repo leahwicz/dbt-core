@@ -33,13 +33,6 @@ jobs:
       - uses: actions/setup-python@v2
         with:
           python-version: "3.8"
-          
-      - name: Find release type
-        id: release_type
-        env:
-          IS_PRERELEASE: ${{ contains(github.event.inputs.version_number, 'rc') ||  contains(github.event.inputs.version_number, 'b') }}
-        run: |
-          echo ::set-output name=isPrerelease::$IS_PRERELEASE
 
       - name: Install python dependencies
         run: |
@@ -60,9 +53,27 @@ jobs:
           env/bin/bumpversion --allow-dirty --new-version ${{ github.event.inputs.version_number }} major
           pre-commit run trailing-whitespace --files .bumpversion.cfg
           git status
+ 
+      # this step will fail on whitespace errors but also correct them
+      - name: Format bumpversion file
+        continue-on-error: true
+        run: |
+          pre-commit run trailing-whitespace --files .bumpversion.cfg
+          git status
           
       - name: Run changie
-        run: |     
+        run: |
+          regex="([1-9].[0-9].[0-9])?([rc|b]{1,2}[1-9])"
+          if [[ ${{ github.event.inputs.version_number }} =~ $regex ]]
+          then
+            version="${BASH_REMATCH[1]}"
+            prerelease="${BASH_REMATCH[2]}"
+            echo $version --- $prerelease
+            changie batch $version  --move-dir '$version' --prerelease '$prerelease' 
+          else
+            changie batch ${{ github.event.inputs.version_number }}  --move-dir '${{ github.event.inputs.version_number }}' --prerelease 'rc1'  
+          fi
+          changie merge
           git status
 
       - name: Commit version bump to branch
@@ -70,7 +81,7 @@ jobs:
         with:
           author_name: 'Github Build Bot'
           author_email: 'buildbot@fishtownanalytics.com'
-          message: 'Bumping version to${{ github.event.inputs.version_number }}'
+          message: 'Bumping version to ${{ github.event.inputs.version_number }}'
           branch: 'bumping-version/${{ github.event.inputs.version_number }}_${{GITHUB.RUN_ID}}'
           push: 'origin origin/bumping-version/${{ github.event.inputs.version_number }}_${{GITHUB.RUN_ID}}'
 
