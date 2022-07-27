@@ -27,7 +27,7 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      - name: [DEBUG] Print Variables
+      - name: "[DEBUG] Print Variables"
         run: |
           echo "all variables defined as inputs"
           echo The version_number: ${{ github.event.inputs.version_number }}
