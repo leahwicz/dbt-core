@@ -80,8 +80,10 @@ jobs:
           brew install changie
           if [[ ${{ steps.semver.outputs.is-pre-release }} ]]
           then
+            echo "preeeeee"
             changie batch ${{ steps.semver.outputs.base-version }}  --move-dir '${{ steps.semver.outputs.base-version }}' --prerelease '${{ steps.semver.outputs.pre-release }}'
           else
+            echo "finallllll"
             changie batch ${{ steps.semver.outputs.base-version }}  --include '${{ steps.semver.outputs.base-version }}' --remove-prereleases
           fi
           changie merge
