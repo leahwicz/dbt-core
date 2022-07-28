@@ -91,7 +91,7 @@ jobs:
           author_name: 'Github Build Bot'
           author_email: 'buildbot@fishtownanalytics.com'
           message: 'Bumping version to ${{ github.event.inputs.version_number }} and generate CHANGELOG'
-          branch: 'bumping-version/${{ github.event.inputs.version_number }}_${{GITHUB.RUN_ID}}'
+          branch: '${{ steps.variables.outputs.BRANCH_NAME }}'
           push: 'origin origin/${{ steps.variables.outputs.BRANCH_NAME }}'
 
       - name: Create Pull Request
@@ -100,6 +100,6 @@ jobs:
           author: 'Github Build Bot <buildbot@fishtownanalytics.com>'
           base: ${{github.ref}}
           title: 'Bumping version to ${{ github.event.inputs.version_number }} and generate changelog'
-          branch: 'bumping-version/${{ github.event.inputs.version_number }}_${{GITHUB.RUN_ID}}'
+          branch: '${{ steps.variables.outputs.BRANCH_NAME }}'
           labels: |
             Skip Changelog
