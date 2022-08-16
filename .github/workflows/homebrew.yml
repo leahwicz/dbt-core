@@ -36,7 +36,7 @@ jobs:
           brew update
           brew install git
           brew tap dbt-labs/dbt
-          brew install ${{ github.event.inputs.dbt-package }}@${{ github.event.inputs.version }}
+          brew install -vd ${{ github.event.inputs.dbt-package }}@${{ github.event.inputs.version }}
           
       - name: Verify ${{ github.event.inputs.dbt-package }}@${{ github.event.inputs.version }} version
         run: |
