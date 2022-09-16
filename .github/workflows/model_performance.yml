@@ -292,10 +292,12 @@ jobs:
         run: ls -R performance/baselines/
         
       - name: '[DEBUG] git status'
-        run: git status
+        run: |
+          git status
+          
 
       - name: Make Branch
-        uses: EndBug/add-and-commit@v8
+        uses: EndBug/add-and-commit@v9
         with:
           add: 'performance/baselines/*'
           author_name: 'Github Build Bot'
