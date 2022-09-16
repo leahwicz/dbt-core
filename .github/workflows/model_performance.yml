@@ -288,7 +288,7 @@ jobs:
       - name: Create PR branch
         run: |
           git checkout -b performance-bot/main_${{needs.latest-runner.outputs.release_id}}_${{GITHUB.RUN_ID}}
-          git push originperformance-bot/main_${{needs.latest-runner.outputs.release_id}}_${{GITHUB.RUN_ID}}
+          git push origin performance-bot/main_${{needs.latest-runner.outputs.release_id}}_${{GITHUB.RUN_ID}}
           git branch --set-upstream-to=origin/performance-bot/main_${{needs.latest-runner.outputs.release_id}}_${{GITHUB.RUN_ID}} performance-bot/main_${{needs.latest-runner.outputs.release_id}}_${{GITHUB.RUN_ID}}
 
       - name: '[DEBUG] ls baselines before artifact download'
