@@ -88,11 +88,17 @@ jobs:
           git status
 
       # this step will fail on whitespace errors but also correct them
-      - name: Format bumpversion and changie files
+      - name: Format bumpversion
         continue-on-error: true
         run: |
           brew install pre-commit
           pre-commit run trailing-whitespace --files .bumpversion.cfg
+          git status
+
+      # this step will fail on whitespace errors but also correct them
+      - name: Format changie files
+        continue-on-error: true
+        run: |
           pre-commit run end-of-file-fixer --files CHANGELOG.md .changes/*
           git status
 
