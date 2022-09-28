@@ -92,7 +92,7 @@ jobs:
         continue-on-error: true
         run: |
           brew install pre-commit
-          pre-commit run trailing-whitespace --files .bumpversion.cfg .changes/*
+          pre-commit run trailing-whitespace
           git status
 
       - name: Commit version bump to branch
