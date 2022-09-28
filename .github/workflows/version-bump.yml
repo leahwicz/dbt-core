@@ -77,15 +77,15 @@ jobs:
       - name: Install Homebrew
         run: |
           /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          test -d ~/.linuxbrew && eval "$(~/.linuxbrew/bin/brew shellenv)"
-          test -d /home/linuxbrew/.linuxbrew && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          test -r ~/.bash_profile && echo "eval \"\$($(brew --prefix)/bin/brew shellenv)\"" >> ~/.bash_profile
-          echo "eval \"\$($(brew --prefix)/bin/brew shellenv)\"" >> ~/.profile
-
+          echo '# Set PATH, MANPATH, etc., for Homebrew.' >> /home/runner/.bash_profile
+          echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /home/runner/.bash_profile
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          sudo apt-get install build-essential
+    
       - name: Run changie
         run: |
-          brew tap miniscruff/changie https://github.com/miniscruff/changie
-          brew install changie
+          /home/linuxbrew/.linuxbrew/bin/brew tap miniscruff/changie https://github.com/miniscruff/changie
+          /home/linuxbrew/.linuxbrew/bin/brew install changie
           if [[ ${{ steps.semver.outputs.is-pre-release }} -eq 1 ]]
           then
             echo "preeeeee"
