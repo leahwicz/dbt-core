@@ -92,7 +92,7 @@ jobs:
         continue-on-error: true
         run: |
           brew install pre-commit
-          pre-commit run trailing-whitespace end-of-file-fixer --files .bumpversion.cfg CHANGELOG.md .changes/*
+          pre-commit run trailing-whitespace --files .bumpversion.cfg
           pre-commit run end-of-file-fixer --files CHANGELOG.md .changes/*
           git status
 
