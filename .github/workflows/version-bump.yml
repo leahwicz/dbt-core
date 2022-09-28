@@ -46,6 +46,10 @@ jobs:
           source env/bin/activate
           pip install --upgrade pip
 
+      - name: Add Homebrew to PATH
+        run: |
+          echo "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin" >> $GITHUB_PATH
+
       - name: Audit Version and Parse Into Parts
         id: semver
         uses: dbt-labs/actions/parse-semver@v1
@@ -77,10 +81,6 @@ jobs:
           brew install pre-commit
           pre-commit run trailing-whitespace --files .bumpversion.cfg
           git status
-          
-      - name: Add Homebrew to PATH
-        run: |
-          echo "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin" >> $GITHUB_PATH
 
       - name: Run changie
         run: |
