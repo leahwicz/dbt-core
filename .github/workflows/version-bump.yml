@@ -74,14 +74,6 @@ jobs:
           env/bin/bumpversion --allow-dirty --new-version ${{ github.event.inputs.version_number }} major
           git status
 
-      # this step will fail on whitespace errors but also correct them
-      - name: Format bumpversion file
-        continue-on-error: true
-        run: |
-          brew install pre-commit
-          pre-commit run trailing-whitespace --files .bumpversion.cfg
-          git status
-
       - name: Run changie
         run: |
           brew tap miniscruff/changie https://github.com/miniscruff/changie
@@ -93,6 +85,14 @@ jobs:
             changie batch ${{ steps.semver.outputs.base-version }}  --include '${{ steps.semver.outputs.base-version }}' --remove-prereleases
           fi
           changie merge
+          git status
+
+      # this step will fail on whitespace errors but also correct them
+      - name: Format bumpversion and changie files
+        continue-on-error: true
+        run: |
+          brew install pre-commit
+          pre-commit run trailing-whitespace --files .bumpversion.cfg .changes/*
           git status
 
       - name: Commit version bump to branch
