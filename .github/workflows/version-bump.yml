@@ -50,6 +50,12 @@ jobs:
         run: |
           echo "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin" >> $GITHUB_PATH
 
+      - name: Install Homebrew packages
+        run: |
+          brew install pre-commit
+          brew tap miniscruff/changie https://github.com/miniscruff/changie
+          brew install changie
+
       - name: Audit Version and Parse Into Parts
         id: semver
         uses: dbt-labs/actions/parse-semver@v1
@@ -76,8 +82,6 @@ jobs:
 
       - name: Run changie
         run: |
-          brew tap miniscruff/changie https://github.com/miniscruff/changie
-          brew install changie
           if [[ ${{ steps.semver.outputs.is-pre-release }} -eq 1 ]]
           then
             changie batch ${{ steps.semver.outputs.base-version }}  --move-dir '${{ steps.semver.outputs.base-version }}' --prerelease '${{ steps.semver.outputs.pre-release }}'
@@ -91,7 +95,6 @@ jobs:
       - name: Remove trailing whitespace
         continue-on-error: true
         run: |
-          brew install pre-commit
           pre-commit run trailing-whitespace --files .bumpversion.cfg CHANGELOG.md .changes/*
           git status
 
