@@ -216,15 +216,15 @@ jobs:
     strategy:
       matrix:
         include:
-          - base-branch: "refs/heads/main"
-            target-branch: "performance-bot/main_${{needs.set-variables.outputs.release_id}}_${{GITHUB.RUN_ID}}"
-          - base-branch: "refs/heads/${{ needs.set-variables.outputs.release_branch }}"
-            target-branch: "performance-bot/release_${{needs.set-variables.outputs.release_id}}_${{GITHUB.RUN_ID}}"
+          - base-branch: refs/heads/main
+            target-branch: performance-bot/main_${{ needs.set-variables.outputs.release_id }}_${{GITHUB.RUN_ID}}
+          - base-branch: refs/heads/${{ needs.set-variables.outputs.release_branch }}
+            target-branch: performance-bot/release_${{ needs.set-variables.outputs.release_id }}_${{GITHUB.RUN_ID}}
 
     steps:
       - name: '[DEBUG] print variables'
         run: |
-          echo "all variables defined in set-variables > Set Variables > outputs"
+          echo "all variables defined in set-variables"
           echo "cache_key:      ${{ needs.set-variables.outputs.cache_key }}"
           echo "release_id:     ${{ needs.set-variables.outputs.release_id }}"
           echo "release_branch: ${{ needs.set-variables.outputs.release_branch }}"
