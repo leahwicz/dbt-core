@@ -209,7 +209,7 @@ jobs:
 
     # depends on `model` as a separate job so that the baseline can be committed to more than one branch
     # i.e. release branch and main
-    needs: [latest-runner, model]
+    needs: [set-variables, latest-runner, model]
 
     runs-on: ubuntu-latest
 
